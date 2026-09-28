@@ -33,13 +33,11 @@ jobs:
       - name: Copy Environment Configuration
         env:
           GOOGLE_API_CREDENTIALS: ${{ secrets.GOOGLE_API_CREDENTIALS }}
-          FE_ENV: ${{ secrets.FE_ENV_STAGING }}
           AUTHORITIES: ${{ secrets.AUTHORITIES }}
         run: |
           mkdir -p app/order-api/public/json
           echo "$GOOGLE_API_CREDENTIALS" > app/order-api/public/json/credentials.json
           echo "$AUTHORITIES" > app/order-api/public/json/authorities.json
-          echo "$FE_ENV" > app/order-ui/.env
 
       # Step 3: Log in to GitHub Container Registry
       - name: Log in to GitHub Container Registry
@@ -57,14 +55,4 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.REPOSITORY_OWNER }}/terminal-api:staging
           labels: ${{ env.REGISTRY }}/${{ env.REPOSITORY_OWNER }}/terminal-api
-          push: true
-
-      - name: Build and push terminal-ui image
-        uses: docker/build-push-action@v4
-        with:
-          context: ./app/order-ui
-          file: ./.build/order-ui/Dockerfile
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.REPOSITORY_OWNER }}/terminal-ui:staging
-          labels: ${{ env.REGISTRY }}/${{ env.REPOSITORY_OWNER }}/terminal-ui
           push: true

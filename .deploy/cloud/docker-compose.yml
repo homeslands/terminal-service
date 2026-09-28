@@ -24,7 +24,7 @@ services:
   terminal-api:
     image: ghcr.io/homeslands/terminal-api:latest
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/${VERSION}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8088/api/${VERSION}/health"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -130,17 +130,6 @@ services:
       timeout: 10s
       retries: 12
       start_period: 30s
-    deploy:
-      restart_policy:
-        condition: on-failure
-
-  terminal-ui:
-    image: ghcr.io/homeslands/terminal-ui:latest
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "5174"] # TCP check on port 5174
-      interval: 10s # Increase interval between health checks
-      timeout: 10s # Increase timeout for slower responses
-      retries: 5
     deploy:
       restart_policy:
         condition: on-failure

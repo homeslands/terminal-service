@@ -134,7 +134,7 @@ This is an example of how to list things you need to use the software and how to
     DATABASE_NAME=database
     DATABASE_HOST=localhost
     DATABASE_PORT=3306
-    PORT=8080
+    PORT=8088
     NODE_ENV=development
     VERSION=v1.0.0
    ```

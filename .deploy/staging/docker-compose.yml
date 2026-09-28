@@ -23,7 +23,7 @@ services:
   terminal-api:
     image: ghcr.io/homeslands/terminal-api:staging
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/${VERSION}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8088/api/${VERSION}/health"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -115,7 +115,7 @@ services:
     depends_on:
       - terminal_mysql_db
     ports:
-      - 8081:8081
+      - 8088:8088
 
   terminal_mysql_db:
     image: mysql:8.2.0
@@ -145,19 +145,6 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
-
-  terminal-ui:
-    image: ghcr.io/homeslands/terminal-ui:staging
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "5174"] # TCP check on port 5174
-      interval: 10s # Increase interval between health checks
-      timeout: 10s # Increase timeout for slower responses
-      retries: 5
-    deploy:
-      restart_policy:
-        condition: on-failure
-    ports:
-      - 5174:5174
 
   # postgres:
   #   image: postgres:16-alpine

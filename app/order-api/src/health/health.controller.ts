@@ -13,6 +13,8 @@ import { Public } from 'src/auth/decorator/public.decorator';
 @ApiExcludeController(true)
 export class HealthController {
   private readonly version: string = this.configService.get<string>('VERSION');
+  private readonly port: string =
+    this.configService.get<string>('PORT') || '8088';
 
   constructor(
     private readonly healthCheckService: HealthCheckService,
@@ -28,7 +30,7 @@ export class HealthController {
       () =>
         this.httpHealthIndicator.pingCheck(
           'order-api',
-          `http://localhost:8081/api/${this.version}/hello`,
+          `http://localhost:${this.port}/api/${this.version}/hello`,
         ),
     ]);
   }

@@ -2,8 +2,8 @@ name: deploy-dev
 
 on:
   push:
-      branches:
-        - dev
+    branches:
+      - dev
 
 jobs:
   deploy:
@@ -24,9 +24,9 @@ jobs:
 
       - name: Deploy with Docker Compose
         env:
-          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-          REMOTE_USER: ${{ secrets.REMOTE_USER }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST_DEV }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER_DEV }}
+          SSH_PORT: ${{ secrets.SSH_PORT_DEV }}
           SSH_PRIVATE_KEY_DEV: ${{ secrets.SSH_PRIVATE_KEY_DEV }}
         run: |
           mkdir -p ~/.ssh
@@ -38,4 +38,5 @@ jobs:
           docker compose -f .deploy/dev/docker-compose.yml pull
           docker compose -f .deploy/dev/docker-compose.yml down
           docker compose -f .deploy/dev/docker-compose.yml up -d
+
           docker image prune -f  # clean up none image after built

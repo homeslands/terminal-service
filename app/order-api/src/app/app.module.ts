@@ -92,6 +92,7 @@ import { CampaignModule } from 'src/campaign/campaign.module';
 import { VatRequestModule } from 'src/vat-request/vat-request.module';
 import { AuditLogsModule } from 'src/audit-logs/audit-logs.module';
 import { ClsModule } from 'nestjs-cls';
+import { TestModule } from 'src/test/test.module';
 @Module({
   imports: [
     ClsModule.forRoot({
@@ -206,6 +207,7 @@ import { ClsModule } from 'nestjs-cls';
     QrPaymentModule,
     CampaignModule,
     VatRequestModule,
+    TestModule,
   ],
   controllers: [AppController],
   providers: [

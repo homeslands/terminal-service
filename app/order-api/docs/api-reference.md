@@ -1,7 +1,7 @@
 # API reference
 
 <!-- [swagger](http://petstore.swagger.io/v2/swagger.json) -->
-<!-- [swagger](http://localhost:8081/api/swagger/json) -->
+<!-- [swagger](http://localhost:8088/api/swagger/json) -->
 
 
 

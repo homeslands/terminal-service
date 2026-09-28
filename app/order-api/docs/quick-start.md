@@ -81,6 +81,6 @@ docsify serve docs -p 3001
 
 ### Preview your site
 
-- You can preview your site in your browser on `http://localhost:5173`.
-- You can preview your API in your browser on `http://localhost:8081/api/api-docs`.
+- You can preview your site in your browser on `http://localhost:5178`.
+- You can preview your API in your browser on `http://localhost:8088/api/api-docs`.
 - You can preview your docs in your browser on `http://localhost:3001/docs`.

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thông báo đặt bàn mới</title>
+    <% var dir=process.cwd() %>
+    <style>
+      <%- include(dir + '/public/css/tailwind.min.css') %>
+    </style>
+  </head>
+  <body>
+    <p>Xin chào,</p>
+    <p>Hệ thống vừa ghi nhận một yêu cầu đặt bàn mới cần được xác nhận.</p>
+    <p><strong>Thông tin đặt bàn:</strong></p>
+    <ul>
+      <li>Khách hàng: <%= locals.customerName %></li>
+      <li>Số điện thoại: <%= locals.phone %></li>
+      <% if (locals.email) { %>
+      <li>Email: <%= locals.email %></li>
+      <% } %>
+      <li>Thời gian đặt: <%= locals.bookingTime %></li>
+      <% if (locals.seats) { %>
+      <li>Số lượng khách: <%= locals.seats %></li>
+      <% } %>
+      <% if (locals.note) { %>
+      <li>Ghi chú: <%= locals.note %></li>
+      <% } %>
+    </ul>
+    <p>Vui lòng vào hệ thống để xác nhận đặt bàn.</p>
+    <p>Trân trọng.</p>
+  </body>
+</html>

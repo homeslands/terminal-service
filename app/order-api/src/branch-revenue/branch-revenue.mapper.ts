@@ -1,0 +1,281 @@
+import { AutomapperProfile, InjectMapper } from '@automapper/nestjs';
+import {
+  createMap,
+  extend,
+  forMember,
+  mapFrom,
+  Mapper,
+} from '@automapper/core';
+import { Injectable } from '@nestjs/common';
+import { baseMapper } from 'src/app/base.mapper';
+import moment from 'moment';
+import {
+  AggregateBranchRevenueResponseDto,
+  BranchRevenueQueryResponseDto,
+  BranchRevenueQueryResponseForHourDto,
+  BranchRevenueResponseDto,
+} from './branch-revenue.dto';
+import { BranchRevenue } from './branch-revenue.entity';
+
+@Injectable()
+export class BranchRevenueProfile extends AutomapperProfile {
+  constructor(@InjectMapper() mapper: Mapper) {
+    super(mapper);
+  }
+
+  override get profile() {
+    return (mapper: Mapper) => {
+      // For day => get and save data
+      createMap(
+        mapper,
+        BranchRevenueQueryResponseDto,
+        BranchRevenue,
+        forMember(
+          (destination) => destination.totalAmount,
+          mapFrom((source) => +source.totalAmount),
+        ),
+        forMember(
+          (destination) => destination.totalAmountBank,
+          mapFrom((source) => +source.totalAmountBank),
+        ),
+        forMember(
+          (destination) => destination.totalAmountCash,
+          mapFrom((source) => +source.totalAmountCash),
+        ),
+        forMember(
+          (destination) => destination.totalAmountInternal,
+          mapFrom((source) => +source.totalAmountInternal),
+        ),
+        forMember(
+          (destination) => destination.originalAmount,
+          mapFrom((source) => +source.totalOriginalAmountOrder),
+        ),
+        // promotionAmount = totalOriginalOrderItemAmount − totalFinalOrderItemAmount − totalVoucherValueOrderItemAmount
+        // Since Phase 1, totalFinalOrderItemAmount = Σ(originalSubtotal − promotion − voucher + vat)
+        // → promotion = Σ − totalVatValueOrderItemAmount  totalVatValueOrderItemAmount
+        // → restores the correct Σ(promotion)
+        forMember(
+          (destination) => destination.promotionAmount,
+          mapFrom(
+            (source) =>
+              +source.totalOriginalOrderItemAmount -
+              +source.totalFinalOrderItemAmount -
+              +source.totalVoucherValueOrderItemAmount +
+              +source.totalVatValueOrderItemAmount,
+          ),
+        ),
+        // voucherAmount = originalAmount − subtotal(excl. delivery) − promotionAmount − accumulatedPoints
+        // subtotal (totalAmount) includes delivery fee; originalAmount excludes it
+        forMember(
+          (destination) => destination.voucherAmount,
+          mapFrom(
+            (source) =>
+              +source.totalOriginalAmountOrder -
+              (+source.totalAmount - +source.totalDeliveryFee) - // subtotal exclude delivery fee
+              // promotion amount
+              (+source.totalOriginalOrderItemAmount -
+                +source.totalFinalOrderItemAmount -
+                +source.totalVoucherValueOrderItemAmount +
+                +source.totalVatValueOrderItemAmount) -
+              // accumulated points to use
+              +source.totalAccumulatedPointsToUse,
+          ),
+        ),
+        // loss amount value only
+        forMember(
+          (destination) => destination.lossAmount,
+          mapFrom((source) => +source.totalLossAmount),
+        ),
+        forMember(
+          (destination) => destination.vatAmount,
+          mapFrom((source) => +source.totalVatValueOrderItemAmount),
+        ),
+        forMember(
+          (destination) => destination.totalOrder,
+          mapFrom((source) => +source.totalOrder),
+        ),
+        forMember(
+          (destination) => destination.totalOrderCash,
+          mapFrom((source) => +source.totalOrderCash),
+        ),
+        forMember(
+          (destination) => destination.totalOrderBank,
+          mapFrom((source) => +source.totalOrderBank),
+        ),
+        forMember(
+          (destination) => destination.totalOrderInternal,
+          mapFrom((source) => +source.totalOrderInternal),
+        ),
+        forMember(
+          (destination) => destination.totalOrderPoint,
+          mapFrom((source) => +source.totalOrderPoint),
+        ),
+        forMember(
+          (destination) => destination.totalAmountPoint,
+          mapFrom((source) => +source.totalAmountPoint),
+        ),
+        forMember(
+          (destination) => destination.totalAccumulatedPointsToUse,
+          mapFrom((source) => +source.totalAccumulatedPointsToUse),
+        ),
+        forMember(
+          (destination) => destination.totalAmountCreditCard,
+          mapFrom((source) => +source.totalAmountCreditCard),
+        ),
+        forMember(
+          (destination) => destination.totalOrderCreditCard,
+          mapFrom((source) => +source.totalOrderCreditCard),
+        ),
+        forMember(
+          (destination) => destination.totalDeliveryFee,
+          mapFrom((source) => +source.totalDeliveryFee),
+        ),
+        forMember(
+          (destination) => destination.totalCostGiftProductAmount,
+          mapFrom((source) => +source.totalCostGiftProductAmount),
+        ),
+        forMember(
+          (destination) => destination.date,
+          mapFrom((source) => {
+            // Date format: YYYY-MM-DDT00:00:00Z
+            // Example: source.date = 2024-12-25T17:00:00.000Z
+            // destination.date: 2024-12-26T00:00:00.000Z
+            return moment(source.date).add(7, 'hours').toDate();
+          }),
+        ),
+      );
+
+      // For hour => Get and return for client
+      createMap(
+        mapper,
+        BranchRevenueQueryResponseForHourDto,
+        BranchRevenue,
+        forMember(
+          (destination) => destination.totalAmount,
+          mapFrom((source) => +source.totalAmount),
+        ),
+        forMember(
+          (destination) => destination.totalAmountBank,
+          mapFrom((source) => +source.totalAmountBank),
+        ),
+        forMember(
+          (destination) => destination.totalAmountCash,
+          mapFrom((source) => +source.totalAmountCash),
+        ),
+        forMember(
+          (destination) => destination.totalAmountInternal,
+          mapFrom((source) => +source.totalAmountInternal),
+        ),
+        forMember(
+          (destination) => destination.originalAmount,
+          mapFrom((source) => +source.totalOriginalAmountOrder),
+        ),
+        // promotionAmount = totalOriginalOrderItemAmount − totalFinalOrderItemAmount − totalVoucherValueOrderItemAmount
+        // Since Phase 1, totalFinalOrderItemAmount = Σ(originalSubtotal − promotion − voucher + vat)
+        // → promotion = Σ − totalVatValueOrderItemAmount  totalVatValueOrderItemAmount
+        // → restores the correct Σ(promotion)
+        forMember(
+          (destination) => destination.promotionAmount,
+          mapFrom(
+            (source) =>
+              +source.totalOriginalOrderItemAmount -
+              +source.totalFinalOrderItemAmount -
+              +source.totalVoucherValueOrderItemAmount +
+              +source.totalVatValueOrderItemAmount,
+          ),
+        ),
+        // voucherAmount = originalAmount − subtotal(excl. delivery) − promotionAmount − accumulatedPoints
+        // subtotal (totalAmount) includes delivery fee; originalAmount excludes it
+        forMember(
+          (destination) => destination.voucherAmount,
+          mapFrom(
+            (source) =>
+              +source.totalOriginalAmountOrder -
+              (+source.totalAmount - +source.totalDeliveryFee) - // subtotal exclude delivery fee
+              // promotion amount
+              (+source.totalOriginalOrderItemAmount -
+                +source.totalFinalOrderItemAmount -
+                +source.totalVoucherValueOrderItemAmount +
+                +source.totalVatValueOrderItemAmount) -
+              // accumulated points to use
+              +source.totalAccumulatedPointsToUse,
+          ),
+        ),
+        // loss amount value only
+        forMember(
+          (destination) => destination.lossAmount,
+          mapFrom((source) => +source.totalLossAmount),
+        ),
+        forMember(
+          (destination) => destination.vatAmount,
+          mapFrom((source) => +source.totalVatValueOrderItemAmount),
+        ),
+        forMember(
+          (destination) => destination.totalOrder,
+          mapFrom((source) => +source.totalOrder),
+        ),
+        forMember(
+          (destination) => destination.totalOrderCash,
+          mapFrom((source) => +source.totalOrderCash),
+        ),
+        forMember(
+          (destination) => destination.totalOrderBank,
+          mapFrom((source) => +source.totalOrderBank),
+        ),
+        forMember(
+          (destination) => destination.totalOrderInternal,
+          mapFrom((source) => +source.totalOrderInternal),
+        ),
+        forMember(
+          (destination) => destination.totalOrderPoint,
+          mapFrom((source) => +source.totalOrderPoint),
+        ),
+        forMember(
+          (destination) => destination.totalAmountPoint,
+          mapFrom((source) => +source.totalAmountPoint),
+        ),
+        forMember(
+          (destination) => destination.totalAccumulatedPointsToUse,
+          mapFrom((source) => +source.totalAccumulatedPointsToUse),
+        ),
+        forMember(
+          (destination) => destination.totalAmountCreditCard,
+          mapFrom((source) => +source.totalAmountCreditCard),
+        ),
+        forMember(
+          (destination) => destination.totalOrderCreditCard,
+          mapFrom((source) => +source.totalOrderCreditCard),
+        ),
+        forMember(
+          (destination) => destination.totalDeliveryFee,
+          mapFrom((source) => +source.totalDeliveryFee),
+        ),
+        forMember(
+          (destination) => destination.totalCostGiftProductAmount,
+          mapFrom((source) => +source.totalCostGiftProductAmount),
+        ),
+        forMember(
+          (destination) => destination.date,
+          mapFrom((source) => {
+            return moment(source.date).toDate();
+          }),
+        ),
+      );
+
+      createMap(
+        mapper,
+        BranchRevenue,
+        BranchRevenueResponseDto,
+        extend(baseMapper(mapper)),
+      );
+
+      createMap(mapper, BranchRevenue, AggregateBranchRevenueResponseDto);
+
+      createMap(
+        mapper,
+        AggregateBranchRevenueResponseDto,
+        AggregateBranchRevenueResponseDto,
+      );
+    };
+  }
+}

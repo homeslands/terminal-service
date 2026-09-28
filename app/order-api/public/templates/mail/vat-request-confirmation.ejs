@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Xác nhận yêu cầu xuất hóa đơn VAT</title>
+    <% var dir=process.cwd() %>
+    <style>
+      <%- include(dir + '/public/css/tailwind.min.css') %>
+    </style>
+  </head>
+  <body>
+    <p>Xin chào,</p>
+    <p>Chúng tôi đã nhận được yêu cầu xuất hóa đơn VAT của bạn cho hóa đơn <strong>#<%= locals.invoiceSlug %></strong> (<%= locals.referenceNumber %>).</p>
+    <p><strong>Thông tin đã gửi:</strong></p>
+    <ul>
+      <li>Tên: <%= locals.customerName %></li>
+      <li>Mã số thuế: <%= locals.taxCode %></li>
+      <li>Địa chỉ: <%= locals.address %></li>
+      <li>Email nhận hóa đơn: <%= locals.email %></li>
+      <% if (locals.companyName) { %>
+      <li>Tên công ty: <%= locals.companyName %></li>
+      <% } %>
+    </ul>
+    <p>Bộ phận kế toán sẽ xử lý và gửi hóa đơn VAT về email này trong thời gian sớm nhất.</p>
+    <p>Trân trọng.</p>
+  </body>
+</html>

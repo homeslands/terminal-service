@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice</title>
+  <% var dir=process.cwd() %>
+    <style>
+      <%- include(dir + '/public/css/tailwind.min.css') %>
+    </style>    
+    <style>
+      html {
+          font-size: 15px !important;
+        }
+      </style>
+</head>
+
+<body>
+  <div class="p-3 pt-0 mr-5 box-border">
+    <!-- Logo -->
+    <div class="mb-1">
+      <div class="flex justify-center items-center">
+        <img src="data:image/png;base64,<%= logoString %>" alt="" class="w-52">
+      </div>
+      <p class="text-sm text-center">
+        <%= branchAddress %>
+      </p>
+      <!-- <div class="flex justify-center items-center">
+        <img src="<%= qrcode %>" alt="qrcode" class="block pt-0 mt-0 w-16" />
+      </div> -->
+      <p class="text-xs text-center">
+        <span class="">
+          Mã đơn:
+        </span>
+        <span class="">
+          <%= referenceNumber %>
+        </span>
+      </p>
+    </div>
+
+    <!-- Invoive info -->
+    <div class="flex flex-col gap-2">
+      <p class="text-xs"><span class="font-bold">Thời gian:</span>
+        <%= formatDate(createdAt, 'HH:mm:ss DD/MM/YYYY' ) %>
+      </p>
+      <p class="text-xs"><span class="font-bold">
+          Khách hàng:
+        </span>
+        <%= customer %>
+      </p>
+      <p class="text-xs">
+        <span class="font-bold">
+          Thu ngân:
+        </span>
+        <%= cashier %>
+      </p>
+      <% if (
+        type === 'at-table'
+      ) { %>
+        <p class="text-xs">
+          <span class="font-bold">
+            Hình thức:
+          </span>
+          <span class="capitalize">
+            Tại bàn
+          </span>
+        </p>
+        <p class="text-xs">
+          <span class="font-bold">
+            Bàn:
+          </span>
+          <span class="capitalize">
+            <%= tableName %>
+          </span>
+        </p>
+        <% if (description !== '') { %>
+          <p class="text-xs">
+            <span class="font-bold">
+              Ghi chú:
+            </span>
+            <span class="capitalize">
+              <%= description %>
+            </span>
+          </p>
+        <% } %>
+      <% } else if (
+        type === 'take-out'
+      ) { %>
+        <p class="text-xs">
+          <span class="font-bold">
+            Hình thức:
+          </span>
+          <span class="capitalize">
+            Mang đi
+          </span>
+        </p>
+        <p class="text-xs">
+          <span class="font-bold">
+            Thời gian mang đi:
+          </span>
+          <%= timeLeftTakeOut %> (phút)
+        </p>
+        <% if (description !== '') { %>
+          <p class="text-xs">
+            <span class="font-bold">
+              Ghi chú:
+            </span>
+            <span class="capitalize">
+              <%= description %>
+            </span>
+          </p>
+        <% } %>
+      <% } else if (
+        type === 'delivery'
+      ) { %>
+        <p class="text-xs">
+          <span class="font-bold">
+            Hình thức:
+          </span>
+          <span class="capitalize">
+            Giao hàng
+          </span>
+        </p>
+        <p class="text-xs">
+          <span class="font-bold">
+            Giao hàng tới:
+          </span>
+          <span class="capitalize">
+            <%= deliveryTo %>
+          </span>
+        </p>
+        <p class="text-xs">
+          <span class="font-bold">
+            SĐT:
+          </span>
+          <span class="capitalize">
+            <%= deliveryPhone %>
+          </span>
+        </p>
+        <% if (description !== '') { %>
+          <p class="text-xs">
+            <span class="font-bold">
+              Ghi chú:
+            </span>
+            <span class="capitalize">
+              <%= description %>
+            </span>
+          </p>
+        <% } %>
+      <% } %>
+    </div>
+
+    <!-- Invoice items -->
+
+    <table class="mt-4 min-w-full text-sm border-collapse table-auto">
+      <thead>
+        <tr class="border-b border-black bg-white-100">
+          <th class="py-2 w-2/5 text-left font-bold">Món</th>
+          <th class="px-1 py-2 text-right font-bold">SL</th>
+          <th class="px-2 py-2 text-right font-bold">
+            <span>Đ.Giá</span>
+            <br>
+            <span>(đ)</span>
+          </th>
+          <th class="px-2 py-2 text-right font-bold">
+            <span>K.Mãi</span>
+            <br>
+            <span>(%)</span>
+          </th>
+          <th class="px-2 py-2 text-right font-bold">
+            <span>T.Tiền</span>
+            <br>
+            <span>(đ)</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        <% invoiceItems.forEach(function(item) { %>
+          <tr class="border-b border-black hover:bg-gray-50">
+            <td class="py-2 w-2/5 text-xs text-left">
+              <%= item.productName %> <span class="uppercase">
+                  (<%= item.size %>)
+                </span>
+                <% if (item.note !== '') { %>
+                  <span>
+                    - <%= item.note %>
+                  </span>
+                <% } %>
+            </td>
+            <td class="px-1 py-2 text-xs text-right">
+              <%= item.quantity %>
+            </td>
+            <td class="px-2 py-2 text-xs text-right">
+              <% if (
+                voucherType === 'same_price_product'
+                && item.isAppliedVoucher
+                && item.price > valueEachVoucher
+              ) { %>
+                <span class="line-through text-red-500">
+                  <%= formatCurrency(item.price) %>
+                </span><br />
+                <span>
+                  <%= formatCurrency(valueEachVoucher) %>
+                </span>
+              <% } else if (
+                voucherType === 'same_price_product'
+                && item.isAppliedVoucher
+                && item.price <= valueEachVoucher
+              ) { %>
+                <span>
+                  <%= formatCurrency(item.price) %>
+                </span>
+              <% } else if (
+                voucherRule === 'at_least_one_required'
+                && voucherType === 'percent_order'
+                && item.isAppliedVoucher
+              ) { %>
+                <span class="line-through text-red-500">
+                  <%= formatCurrency(item.price) %>
+                </span><br />
+                <span>
+                  <%= formatCurrency(item.price - (item.voucherValue / item.quantity)) %>
+                </span>
+              <% } else if (
+                voucherRule === 'at_least_one_required'
+                && voucherType === 'fixed_value'
+                && item.isAppliedVoucher
+              ) { %>
+                <span class="line-through text-red-500">
+                  <%= formatCurrency(item.price) %>
+                </span><br />
+                <span>
+                  <%= formatCurrency(item.price - (item.voucherValue / item.quantity)) %>
+                </span>
+              <% } else if (
+                voucherRule === 'all_required'
+                && voucherType === 'percent_order'
+                && item.isAppliedVoucher
+                && !item.isAppliedPromotion
+              ) { %>
+                <span class="line-through text-red-500">
+                  <%= formatCurrency(item.price) %>
+                </span><br />
+                <span>
+                  <%= formatCurrency(item.price - (item.voucherValue / item.quantity)) %>
+                </span>
+              <% } else if (
+                voucherRule === 'all_required'
+                && voucherType === 'percent_order'
+                && item.isAppliedVoucher
+                && item.isAppliedPromotion
+              ) { %>
+                <span class="line-through text-red-500">
+                  <%= formatCurrency(item.price) %>
+                </span><br />
+                <span>
+                  <%= formatCurrency(item.price - (item.price * item.promotionValue/100) - (item.voucherValue / item.quantity)) %>
+                </span>
+              <% } else if (
+                !item.isAppliedVoucher
+                && item.isAppliedPromotion
+              ) { %>
+                <span class="line-through text-red-500">
+                  <%= formatCurrency(item.price) %>
+                </span><br />
+                <span>
+                  <%= formatCurrency(item.price - (item.price * item.promotionValue/100)) %>
+                </span>
+              <% } else { %>
+                <span>
+                  <%= formatCurrency(item.price) %>
+                </span>
+              <% } %>
+            </td>
+            <td class="px-2 py-2 text-xs text-right">
+              <% if (item.isAppliedVoucher && !item.isAppliedPromotion) { %>
+                0
+              <% } else { %>
+                <%= item.promotionValue %>
+              <% } %>
+            </td>
+            <td class="px-2 py-2 text-xs text-right break-all">
+              <%= formatCurrency(item.total) %>
+                <% if (item.isAppliedPromotion && item.isAppliedVoucher) { %>
+                  (* **)
+                <% } else if (item.isAppliedPromotion) { %>
+                  (*)
+                <% } else if (item.isAppliedVoucher) { %>
+                  (**)
+                <% } else if (item.isCustomPrice) { %>
+                  (***)
+                <% } %>
+            </td>
+          </tr>
+          <% if (item.vatRate > 0) { %>
+          <tr>
+            <td colspan="5" class="pb-1 pl-2 text-xs text-gray-500 italic">
+              (VAT <%= item.vatRate %>%: <%= formatCurrency(item.vatValue) %>đ)
+            </td>
+          </tr>
+          <% } %>
+          <% }); %>
+            <tr class="border-t border-black">
+              <td class="py-2 text-left">PTTT</td>
+              <td class="py-2 text-xs font-bold text-right" colspan="4">
+                <%= formatPaymentMethod(paymentMethod) %>
+              </td>
+            </tr>
+            <tr class="border-t border-black">
+              <td class="py-2 text-left" colspan="3">Tổng cộng (đ)</td>
+              <td class="py-2 text-right break-all" colspan="2">
+                <%= formatCurrency(originalSubtotalOrder) %>
+              </td>
+            </tr>
+            <tr class="border-t border-black">
+              <td class="py-2 text-left" colspan="4">Tổng khuyến mãi (đ)</td>
+              <td class="py-2 text-right">
+                <%= formatCurrency(orderItemPromotionValue) %>
+              </td>
+            </tr>
+
+            <tr class="border-t border-black">
+              <% if (voucherCode !=='N/A' ) { %>
+                <td class="py-2 text-left" colspan="2">
+                  Tổng giảm giá (đ)
+                </td>
+                <% } %>
+                  <% if (voucherCode==='N/A' ) { %>
+                    <td class="py-2 text-left" colspan="4">
+                      Tổng giảm giá (đ)
+                    </td>
+                    <% } %>
+                      <td class="py-2 text-right">
+                        <%= formatCurrency(voucherValue) %>
+                      </td>
+            </tr>
+
+            <tr class="border-t border-black">
+              <td class="py-2 text-left" colspan="4">Tổng VAT (đ)</td>
+              <td class="py-2 text-right">
+                <%= formatCurrency(totalVatValue) %>
+              </td>
+            </tr>
+
+            <% if ((type==='delivery' )) { %>
+              <tr class="border-t border-black">
+                <td class="py-2 text-left" colspan="4">
+                  Phí giao hàng (đ)
+                </td>
+                <td class="py-2 text-right">
+                  <%= formatCurrency(deliveryFee) %>
+                </td>
+              </tr>
+            <% } %>
+
+            <tr class="border-t border-black">
+              <td class="py-2 text-left" colspan="4">
+                Số điểm tích lũy đã dùng (điểm)
+              </td>
+              <td class="py-2 text-right" colspan="1">
+                <%= formatCurrency(accumulatedPointsToUse) %>
+              </td>
+            </tr>
+
+            <% if ((paymentMethod==='point' )) { %>
+              <tr class="border-t border-black">
+                <td class="py-2 text-left" colspan="4">
+                  Số xu đã trừ (xu)
+                </td>
+                <td class="py-2 text-right">
+                  <%= formatCurrency(usedPoints) %>
+                </td>
+              </tr>
+              <% } %>
+              
+              <tr class="border-t border-black" >
+                <td class="py-2 text-left" colspan="3">Thành tiền (đ)</td>
+                <td class="py-2 font-bold text-right break-all" colspan="2">
+                  <% if ((paymentMethod==='point' )) { %>
+                    <%= formatCurrency(0) %>
+                      <% } else { %>
+                        <%= formatCurrency(amount) %>
+                          <% } %>
+                </td>
+              </tr>
+      </tbody>
+    </table>
+    <p class="text-xs mt-2">
+      (*) Sản phẩm được ưu đãi theo chương trình khuyến mãi
+    </p>
+    <p class="text-xs">
+      (**) Sản phẩm được ưu đãi theo mã giảm giá
+    </p>
+    <p class="text-xs">
+      (* **) Sản phẩm được ưu đãi theo cả khuyến mãi và mã giảm giá
+    </p>
+    <p class="text-xs">
+      (***) Sản phẩm có giá tùy chỉnh
+    </p>
+
+    <div class="mb-1">
+      <br/>
+      <p class="text-xs text-center">
+        <span class="font-bold">
+          Wifi:
+        </span>
+        <span class="">
+          <%= wifiName %>
+        </span>
+        <span class="font-bold">
+           - Mật khẩu:
+        </span>
+        <span class="">
+          <%= wifiPassword %>
+        </span>
+      </p>
+    </div>
+  </div>
+</body>
+
+</html>

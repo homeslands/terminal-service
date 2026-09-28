@@ -1,0 +1,170 @@
+import { HttpService } from '@nestjs/axios';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { SystemConfigKey } from 'src/system-config/system-config.constant';
+import { SystemConfigService } from 'src/system-config/system-config.service';
+import {
+  ZaloOaInitiateSmsByMultiChannelMessageRequestDto,
+  ZaloOaInitiateSmsRequestDto,
+  ZaloOaInitiateSmsResponseDto,
+} from './zalo-oa-connector.dto';
+import { catchError, firstValueFrom } from 'rxjs';
+import { AxiosError } from 'axios';
+import { ZaloOaConnectorException } from './zalo-oa-connector.exception';
+import { ZaloOaConnectorValidation } from './zalo-oa-connector.validation';
+
+@Injectable()
+export class ZaloOaConnectorClient {
+  constructor(
+    private readonly httpService: HttpService,
+    @Inject(WINSTON_MODULE_NEST_PROVIDER)
+    private readonly logger: Logger,
+    private readonly systemConfigService: SystemConfigService,
+  ) {}
+
+  async getZaloOaApiUrl() {
+    const context = `${ZaloOaConnectorClient.name}.${this.getZaloOaApiUrl.name}`;
+    const zaloOaApiUrl = await this.systemConfigService.get(
+      SystemConfigKey.ZALO_OA_API_URL,
+    );
+    if (!zaloOaApiUrl) {
+      this.logger.error(
+        `Zalo OA API URL not found for key ${SystemConfigKey.ZALO_OA_API_URL}`,
+        null,
+        context,
+      );
+      throw new ZaloOaConnectorException(
+        ZaloOaConnectorValidation.ZALO_OA_API_URL_NOT_FOUND,
+      );
+    }
+    return zaloOaApiUrl;
+  }
+
+  async initiateVerifyPhoneNumberSms(requestData: ZaloOaInitiateSmsRequestDto) {
+    const context = `${ZaloOaConnectorClient.name}.${this.initiateVerifyPhoneNumberSms.name}`;
+    const requestUrl = `${await this.getZaloOaApiUrl()}/MainService.svc/json/SendZaloMessage_V6/`;
+    const { data } = await firstValueFrom(
+      this.httpService
+        .post<ZaloOaInitiateSmsResponseDto>(requestUrl, requestData, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        .pipe(
+          catchError((error: AxiosError) => {
+            this.logger.error(
+              `Initiate SMS verify phone number failed: ${JSON.stringify(error.response?.data)}`,
+              error.stack,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.INITIATE_SMS_VERIFY_ACCOUNT_FAIL,
+              error.message,
+            );
+          }),
+        ),
+    );
+    this.logger.log(`Initiate SMS verify phone number success`, context);
+    return data;
+  }
+
+  /**
+   * Initiate SMS verify phone number by multi channel message
+   * Priority: Zalo > SMS
+   * @param requestData ZaloOaInitiateSmsRequestDto
+   * @returns ZaloOaInitiateSmsResponseDto
+   */
+  async initiateVerifyPhoneNumberSmsByMultiChannelMessage(
+    requestData: ZaloOaInitiateSmsByMultiChannelMessageRequestDto,
+  ) {
+    const context = `${ZaloOaConnectorClient.name}.${this.initiateVerifyPhoneNumberSmsByMultiChannelMessage.name}`;
+    const requestUrl = `${await this.getZaloOaApiUrl()}/MainService.svc/json/MultiChannelMessage/`;
+    const { data } = await firstValueFrom(
+      this.httpService
+        .post<ZaloOaInitiateSmsResponseDto>(requestUrl, requestData, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        .pipe(
+          catchError((error: AxiosError) => {
+            this.logger.error(
+              `Initiate SMS verify phone number failed: ${JSON.stringify(error.response?.data)}`,
+              error.stack,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.ERROR_INITIATE_SMS_VERIFY_ACCOUNT_BY_MULTI_CHANNEL_MESSAGE,
+              error.message,
+            );
+          }),
+        ),
+    );
+    this.logger.log(
+      `Initiate SMS verify phone number by multi channel message success`,
+      context,
+    );
+    return data;
+  }
+
+  async initiateForgotPasswordSms(requestData: ZaloOaInitiateSmsRequestDto) {
+    const context = `${ZaloOaConnectorClient.name}.${this.initiateForgotPasswordSms.name}`;
+    const requestUrl = `${await this.getZaloOaApiUrl()}/MainService.svc/json/SendZaloMessage_V6/`;
+    const { data } = await firstValueFrom(
+      this.httpService
+        .post<ZaloOaInitiateSmsResponseDto>(requestUrl, requestData, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        .pipe(
+          catchError((error: AxiosError) => {
+            this.logger.error(
+              `Initiate SMS forgot password failed: ${JSON.stringify(error.response?.data)}`,
+              error.stack,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.ERROR_INITIATE_SMS_FORGOT_PASSWORD,
+              error.message,
+            );
+          }),
+        ),
+    );
+    this.logger.log(`Initiate SMS forgot password success`, context);
+    return data;
+  }
+
+  async initiateForgotPasswordSmsByMultiChannelMessage(
+    requestData: ZaloOaInitiateSmsByMultiChannelMessageRequestDto,
+  ) {
+    const context = `${ZaloOaConnectorClient.name}.${this.initiateForgotPasswordSmsByMultiChannelMessage.name}`;
+    const requestUrl = `${await this.getZaloOaApiUrl()}/MainService.svc/json/MultiChannelMessage/`;
+    const { data } = await firstValueFrom(
+      this.httpService
+        .post<ZaloOaInitiateSmsResponseDto>(requestUrl, requestData, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+        .pipe(
+          catchError((error: AxiosError) => {
+            this.logger.error(
+              `Initiate SMS forgot password by multi channel message failed: ${JSON.stringify(error.response?.data)}`,
+              error.stack,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.ERROR_INITIATE_SMS_FORGOT_PASSWORD_BY_MULTI_CHANNEL_MESSAGE,
+              error.message,
+            );
+          }),
+        ),
+    );
+    this.logger.log(
+      `Initiate SMS forgot password by multi channel message success`,
+      context,
+    );
+    return data;
+  }
+}

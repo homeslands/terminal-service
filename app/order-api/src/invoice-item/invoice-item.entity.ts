@@ -1,0 +1,96 @@
+import { AutoMap } from '@automapper/classes';
+import { Base } from 'src/app/base.entity';
+import { Invoice } from 'src/invoice/invoice.entity';
+import { DiscountType } from 'src/order/order.constants';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+
+@Entity('invoice_item_tbl')
+export class InvoiceItem extends Base {
+  @AutoMap()
+  @Column({ name: 'quantity_column' })
+  quantity: number;
+
+  @AutoMap()
+  @Column({ name: 'price_column' })
+  price: number;
+
+  @AutoMap()
+  @Column({ name: 'product_name_column' })
+  productName: string;
+
+  @AutoMap()
+  @Column({ name: 'size_column' })
+  size: string;
+
+  @AutoMap()
+  @Column({ name: 'total_column' })
+  total: number;
+
+  @AutoMap()
+  @Column({ name: 'total_cost_column', default: 0 })
+  totalCost: number;
+
+  @AutoMap()
+  @Column({ name: 'is_gift_column', default: false })
+  isGift: boolean;
+
+  @AutoMap()
+  @Column({ name: 'discount_type_column', default: DiscountType.NONE })
+  discountType: string;
+
+  @AutoMap()
+  @Column({ name: 'is_applied_promotion_column', default: false })
+  isAppliedPromotion: boolean;
+
+  @AutoMap()
+  @Column({ name: 'is_applied_voucher_column', default: false })
+  isAppliedVoucher: boolean;
+
+  @AutoMap()
+  @Column({ name: 'voucher_value_column', default: 0 })
+  voucherValue: number;
+
+  @AutoMap()
+  @Column({ name: 'promotion_value_column', default: 0 })
+  promotionValue: number;
+
+  @AutoMap()
+  @Column({ name: 'promotion_id_column', nullable: true })
+  promotionId?: string;
+
+  // if there is a new Invoice instance set
+  // on this relation, InvoiceItems will be inserted automatically to the db when you save this Invoice entity
+  @ManyToOne(() => Invoice, (invoice) => invoice.invoiceItems)
+  @JoinColumn({ name: 'invoice_column' })
+  invoice: Invoice;
+
+  @AutoMap()
+  @Column({ name: 'note_column', nullable: true })
+  note?: string;
+
+  @AutoMap()
+  @Column({ name: 'is_custom_price_column', default: false })
+  isCustomPrice: boolean;
+
+  @AutoMap()
+  @Column({
+    name: 'vat_rate_column',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 0,
+    transformer: { to: (v) => v, from: (v) => parseFloat(v) },
+  })
+  vatRate: number;
+
+  @AutoMap()
+  @Column({
+    name: 'vat_value_column',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    default: 0,
+    transformer: { to: (v) => v, from: (v) => parseFloat(v) },
+  })
+  vatValue: number;
+}

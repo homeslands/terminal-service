@@ -1,0 +1,63 @@
+import { createErrorCode, TErrorCodeValue } from 'src/app/app.validation';
+
+export const PRINTER_NOT_FOUND = 'PRINTER_NOT_FOUND';
+export const PRINTER_ALREADY_EXISTS = 'PRINTER_ALREADY_EXISTS';
+export const UN_SUPPORTED_PRINTER_TYPE = 'UN_SUPPORTED_PRINTER_TYPE';
+export const EOS_POST_SEND_ERROR = 'EOS_POST_SEND_ERROR';
+export const ERROR_PRINTING_JOB = 'ERROR_PRINTING_JOB';
+export const PRINTER_NOT_ACTIVE = 'PRINTER_NOT_ACTIVE';
+export const ERROR_PRINTING_CHEF_ORDER = 'ERROR_PRINTING_CHEF_ORDER';
+export const ERROR_PRINTING_TICKET = 'ERROR_PRINTING_TICKET';
+export const ERROR_PRINTING_INVOICE = 'ERROR_PRINTING_INVOICE';
+export const START_DATE_MUST_BE_BEFORE_END_DATE =
+  'START_DATE_MUST_BE_BEFORE_END_DATE';
+export const START_DATE_MUST_BE_BEFORE_NOW = 'START_DATE_MUST_BE_BEFORE_NOW';
+export const END_DATE_MUST_BE_BEFORE_NOW = 'END_DATE_MUST_BE_BEFORE_NOW';
+export type TPrinterErrorCodeKey =
+  | typeof PRINTER_NOT_FOUND
+  | typeof PRINTER_ALREADY_EXISTS
+  | typeof UN_SUPPORTED_PRINTER_TYPE
+  | typeof EOS_POST_SEND_ERROR
+  | typeof ERROR_PRINTING_JOB
+  | typeof PRINTER_NOT_ACTIVE
+  | typeof ERROR_PRINTING_CHEF_ORDER
+  | typeof ERROR_PRINTING_TICKET
+  | typeof ERROR_PRINTING_INVOICE
+  | typeof START_DATE_MUST_BE_BEFORE_END_DATE
+  | typeof START_DATE_MUST_BE_BEFORE_NOW
+  | typeof END_DATE_MUST_BE_BEFORE_NOW;
+
+export type TPrinterErrorCode = Record<TPrinterErrorCodeKey, TErrorCodeValue>;
+
+// 158601 - 158700
+const PrinterValidation: TPrinterErrorCode = {
+  PRINTER_NOT_FOUND: createErrorCode(158601, 'Printer not found'),
+  PRINTER_ALREADY_EXISTS: createErrorCode(158602, 'Printer already exists'),
+  UN_SUPPORTED_PRINTER_TYPE: createErrorCode(
+    158603,
+    'Unsupported printer type',
+  ),
+  EOS_POST_SEND_ERROR: createErrorCode(158604, 'ESC/POS send error'),
+  ERROR_PRINTING_JOB: createErrorCode(158605, 'Error printing job'),
+  PRINTER_NOT_ACTIVE: createErrorCode(158606, 'Printer not active'),
+  ERROR_PRINTING_CHEF_ORDER: createErrorCode(
+    158607,
+    'Error printing chef order',
+  ),
+  ERROR_PRINTING_TICKET: createErrorCode(158608, 'Error printing ticket'),
+  ERROR_PRINTING_INVOICE: createErrorCode(158609, 'Error printing invoice'),
+  START_DATE_MUST_BE_BEFORE_END_DATE: createErrorCode(
+    158610,
+    'Start date must be before end date',
+  ),
+  START_DATE_MUST_BE_BEFORE_NOW: createErrorCode(
+    158611,
+    'Start date must be before now',
+  ),
+  END_DATE_MUST_BE_BEFORE_NOW: createErrorCode(
+    158612,
+    'End date must be before now',
+  ),
+};
+
+export default PrinterValidation;

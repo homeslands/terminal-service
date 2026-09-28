@@ -1,0 +1,596 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+  ValidationPipe,
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { Public } from './decorator/public.decorator';
+import {
+  AuthChangePasswordRequestDto,
+  AuthProfileResponseDto,
+  AuthRefreshRequestDto,
+  CompleteRegisterRequestDto,
+  DeleteAccountRequestDto,
+  ForgotPasswordRequestDto,
+  ForgotPasswordTokenRequestDto,
+  InitiateRegisterRequestDto,
+  InitiateRegisterResponseDto,
+  LoginAuthRequestDto,
+  LoginAuthResponseDto,
+  RegisterAuthRequestDto,
+  RegisterAuthResponseDto,
+  ResendRegisterOtpRequestDto,
+  UpdateAuthProfileRequestDto,
+  InitiateVerifyEmailRequestDto,
+  ConfirmEmailVerificationCodeRequestDto,
+  VerifyEmailResponseDto,
+  VerifyPhoneNumberResponseDto,
+  ConfirmPhoneNumberVerificationCodeRequestDto,
+  ForgotPasswordResponseDto,
+  ConfirmForgotPasswordRequestDto,
+  ChangeForgotPasswordRequestDto,
+  ConfirmForgotPasswordResponseDto,
+} from './auth.dto';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import { AppResponseDto } from 'src/app/app.dto';
+import { ApiResponseWithType } from 'src/app/app.decorator';
+import { CurrentUser } from '../user/user.decorator';
+import { CurrentUserDto } from 'src/user/user.dto';
+import { CustomFileInterceptor } from 'src/file/custom-interceptor';
+import { Throttle } from '@nestjs/throttler';
+
+@ApiTags('Authentication')
+@ApiBearerAuth()
+@Controller('auth')
+export class AuthController {
+  constructor(private authService: AuthService) {}
+
+  @HttpCode(HttpStatus.OK)
+  @Post('login')
+  @Public()
+  @ApiOperation({ summary: 'Login' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: LoginAuthResponseDto,
+    description: 'Login successful',
+  })
+  async login(
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+      }),
+    )
+    requestData: LoginAuthRequestDto,
+  ): Promise<AppResponseDto<LoginAuthResponseDto>> {
+    const result = await this.authService.login(requestData);
+    const response = {
+      message: 'Login successful',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<LoginAuthResponseDto>;
+    return response;
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('register/initiate')
+  @Public()
+  @ApiOperation({ summary: 'Initiate OTP-based registration' })
+  @ApiResponseWithType({
+    type: InitiateRegisterResponseDto,
+    description: 'OTP sent successfully',
+  })
+  async initiateRegister(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: InitiateRegisterRequestDto,
+  ): Promise<AppResponseDto<InitiateRegisterResponseDto>> {
+    const result = await this.authService.initiateRegister(requestData);
+    return {
+      message: 'OTP sent successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<InitiateRegisterResponseDto>;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('register/resend')
+  @Public()
+  @ApiOperation({ summary: 'Resend registration OTP' })
+  @ApiResponseWithType({
+    type: InitiateRegisterResponseDto,
+    description: 'OTP resent successfully',
+  })
+  async resendRegisterOtp(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ResendRegisterOtpRequestDto,
+  ): Promise<AppResponseDto<InitiateRegisterResponseDto>> {
+    const result = await this.authService.resendRegisterOtp(requestData);
+    return {
+      message: 'OTP resent successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<InitiateRegisterResponseDto>;
+  }
+
+  @HttpCode(HttpStatus.CREATED)
+  @Post('register/complete')
+  @Public()
+  @ApiOperation({ summary: 'Complete OTP-based registration' })
+  @ApiResponseWithType({
+    type: LoginAuthResponseDto,
+    description: 'Registration completed, logged in successfully',
+  })
+  async completeRegister(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: CompleteRegisterRequestDto,
+  ): Promise<AppResponseDto<LoginAuthResponseDto>> {
+    const result = await this.authService.completeRegister(requestData);
+    return {
+      message: 'Registration completed successfully',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<LoginAuthResponseDto>;
+  }
+
+  @HttpCode(HttpStatus.CREATED)
+  @Post('register')
+  @Public()
+  @ApiOperation({ summary: 'Register account' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: RegisterAuthResponseDto,
+    description: 'Register successful',
+  })
+  async register(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: RegisterAuthRequestDto,
+  ) {
+    const result = await this.authService.register(requestData);
+    const response = {
+      message: 'Registration successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<RegisterAuthResponseDto>;
+    return response;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('initiate-verify-email')
+  @ApiOperation({ summary: 'Initiate verify email' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: VerifyEmailResponseDto,
+    description: 'Initiate verify email successful',
+  })
+  async initiateVerifyEmail(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: InitiateVerifyEmailRequestDto,
+  ) {
+    const result = await this.authService.initiateVerifyEmail(
+      user,
+      requestData,
+    );
+    const response = {
+      message: 'Initiate verify email successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<VerifyEmailResponseDto>;
+    return response;
+  }
+
+  @Throttle({ default: { limit: 1, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('resend-verify-email')
+  @ApiOperation({ summary: 'Resend verify email' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: VerifyEmailResponseDto,
+    description: 'Resend verify email code successful',
+  })
+  async resendVerifyEmailCode(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+  ) {
+    const result = await this.authService.resendVerifyEmailCode(user);
+    const response = {
+      message: 'Resend verify email code successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<VerifyEmailResponseDto>;
+    return response;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('confirm-email-verification/code')
+  @ApiOperation({ summary: 'Confirm email verification' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: String,
+    description: 'Confirm email verification successful',
+  })
+  async confirmVerifyEmailCode(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ConfirmEmailVerificationCodeRequestDto,
+  ) {
+    await this.authService.confirmEmailVerificationCode(user, requestData);
+    const response = {
+      message: 'Confirm email verification successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result: 'Confirm email verification successful',
+    } as AppResponseDto<string>;
+    return response;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('initiate-verify-phone-number')
+  @ApiOperation({ summary: 'Initiate verify phone number' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: VerifyPhoneNumberResponseDto,
+    description: 'Initiate verify phone number successful',
+  })
+  async initiateVerifyPhoneNumber(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+  ) {
+    const result = await this.authService.initiateVerifyPhoneNumber(user);
+    const response = {
+      message: 'Initiate verify phone number successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<VerifyPhoneNumberResponseDto>;
+    return response;
+  }
+
+  @Throttle({ default: { limit: 2, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('resend-verify-phone-number')
+  @ApiOperation({ summary: 'Resend verify phone number' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: VerifyPhoneNumberResponseDto,
+    description: 'Resend verify phone number code successful',
+  })
+  async resendVerifyPhoneNumberCode(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+  ) {
+    const result = await this.authService.resendVerifyPhoneNumberCode(user);
+    const response = {
+      message: 'Resend verify phone number code successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<VerifyPhoneNumberResponseDto>;
+    return response;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('confirm-phone-number-verification/code')
+  @ApiOperation({ summary: 'Confirm phone number verification' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: String,
+    description: 'Confirm phone number verification successful',
+  })
+  async confirmVerifyPhoneNumberCode(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ConfirmPhoneNumberVerificationCodeRequestDto,
+  ) {
+    await this.authService.confirmPhoneNumberVerificationCode(
+      user,
+      requestData,
+    );
+    const response = {
+      message: 'Confirm phone number verification successful',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result: 'Confirm phone number verification successful',
+    } as AppResponseDto<string>;
+    return response;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Get('profile')
+  @ApiOperation({ summary: 'Get profile' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: AuthProfileResponseDto,
+    description: 'Profile retrieved successful',
+  })
+  async getProfile(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+  ): Promise<AppResponseDto<AuthProfileResponseDto>> {
+    const result = await this.authService.getProfile(user);
+    return {
+      message: 'Profile retrieved successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<AuthProfileResponseDto>;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Patch('profile')
+  @ApiOperation({ summary: 'Update profile' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: AuthProfileResponseDto,
+    description: 'Profile updated successfully',
+  })
+  async updateProfile(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: UpdateAuthProfileRequestDto,
+  ): Promise<AppResponseDto<AuthProfileResponseDto>> {
+    const result = await this.authService.updateProfile(user, requestData);
+    return {
+      message: 'Profile updated successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<AuthProfileResponseDto>;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh token' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: LoginAuthResponseDto,
+    description: 'User refreshed token successfully',
+  })
+  @Public()
+  async refresh(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: AuthRefreshRequestDto,
+  ): Promise<AppResponseDto<LoginAuthResponseDto>> {
+    const result = await this.authService.refresh(requestData);
+    return {
+      message: 'User refreshed token successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<LoginAuthResponseDto>;
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('change-password')
+  @ApiOperation({ summary: 'Change password' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: AuthProfileResponseDto,
+    description: 'Password changed successfully',
+  })
+  async changePassword(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: AuthChangePasswordRequestDto,
+  ): Promise<AppResponseDto<AuthProfileResponseDto>> {
+    const result = await this.authService.changePassword(user, requestData);
+    return {
+      message: 'Password changed successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<AuthProfileResponseDto>;
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Forgot password' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: AuthProfileResponseDto,
+    description: 'Password changed successfully',
+  })
+  async forgotPassword(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ForgotPasswordRequestDto,
+  ) {
+    await this.authService.forgotPassword(requestData);
+    return {
+      message: 'Password changed successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+    } as AppResponseDto<void>;
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password/initiate')
+  @ApiOperation({ summary: 'Create forgot password token' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: ForgotPasswordResponseDto,
+    description: 'Token created successfully',
+  })
+  async createForgotPasswordToken(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ForgotPasswordTokenRequestDto,
+  ) {
+    const result =
+      await this.authService.createForgotPasswordToken(requestData);
+    return {
+      message: 'Token created successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<ForgotPasswordResponseDto>;
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password/resend')
+  @ApiOperation({ summary: 'Resend forgot password token' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: ForgotPasswordResponseDto,
+    description: 'Token resend successfully',
+  })
+  async resendForgotPasswordToken(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ForgotPasswordTokenRequestDto,
+  ) {
+    const result =
+      await this.authService.resendForgotPasswordToken(requestData);
+    return {
+      message: 'Token resend successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<ForgotPasswordResponseDto>;
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password/confirm')
+  @ApiOperation({ summary: 'Confirm forgot password token' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: ConfirmForgotPasswordResponseDto,
+    description: 'Token confirmed successfully',
+  })
+  async confirmForgotPassword(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ConfirmForgotPasswordRequestDto,
+  ) {
+    const result = await this.authService.confirmForgotPassword(requestData);
+    return {
+      message: 'Token confirmed successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<ConfirmForgotPasswordResponseDto>;
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password/change')
+  @ApiOperation({ summary: 'Change forgot password token' })
+  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiResponseWithType({
+    type: String,
+    description: 'Token confirmed successfully',
+  })
+  async ChangeForgotPassword(
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: ChangeForgotPasswordRequestDto,
+  ) {
+    await this.authService.ChangeForgotPassword(requestData);
+    return {
+      message: 'Token confirmed successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+      result: 'Forgot password changed successfully',
+    } as AppResponseDto<string>;
+  }
+
+  @Delete('delete-account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete own account' })
+  @ApiResponseWithType({
+    status: HttpStatus.OK,
+    description: 'Account deleted successfully',
+    type: String,
+  })
+  async deleteAccount(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @Body(new ValidationPipe({ transform: true }))
+    requestData: DeleteAccountRequestDto,
+  ): Promise<AppResponseDto<void>> {
+    await this.authService.deleteAccount(user, requestData);
+    return {
+      message: 'Account deleted successfully',
+      statusCode: HttpStatus.OK,
+      timestamp: new Date().toISOString(),
+    } as AppResponseDto<void>;
+  }
+
+  @Patch('/upload')
+  @HttpCode(HttpStatus.OK)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  @ApiResponseWithType({
+    status: HttpStatus.OK,
+    description: 'Avatar have been uploaded successfully',
+    type: AuthProfileResponseDto,
+  })
+  @ApiOperation({ summary: 'Upload avatar' })
+  @ApiResponse({
+    status: 200,
+    description: 'Avatar have been uploaded successfully',
+  })
+  @ApiResponse({ status: 500, description: 'Internal Server Error' })
+  @UseInterceptors(
+    new CustomFileInterceptor('file', {
+      limits: {
+        fileSize: 5 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadAvatar(
+    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
+    user: CurrentUserDto,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const result = await this.authService.uploadAvatar(user, file);
+    return {
+      message: 'Avatar been created successfully',
+      statusCode: HttpStatus.CREATED,
+      timestamp: new Date().toISOString(),
+      result,
+    } as AppResponseDto<AuthProfileResponseDto>;
+  }
+}

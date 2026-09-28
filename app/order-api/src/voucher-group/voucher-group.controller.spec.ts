@@ -1,0 +1,154 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { VoucherGroupController } from './voucher-group.controller';
+import { VoucherGroupService } from './voucher-group.service';
+import { VoucherGroupScheduler } from './voucher-group.scheduler';
+import { VoucherGroupUtils } from './voucher-group.utils';
+import { TransactionManagerService } from 'src/db/transaction-manager.service';
+import { VoucherUtils } from 'src/voucher/voucher.utils';
+import { OrderUtils } from 'src/order/order.utils';
+import { UserUtils } from 'src/user/user.utils';
+import { MenuUtils } from 'src/menu/menu.utils';
+import { MenuItemUtils } from 'src/menu-item/menu-item.utils';
+import { DataSource } from 'typeorm';
+import { dataSourceMockFactory } from 'src/test-utils/datasource-mock.factory';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { repositoryMockFactory } from 'src/test-utils/repository-mock.factory';
+import { VoucherGroup } from './voucher-group.entity';
+import { User } from 'src/user/user.entity';
+import { Voucher } from 'src/voucher/entity/voucher.entity';
+import { Menu } from 'src/menu/menu.entity';
+import { MenuItem } from 'src/menu-item/menu-item.entity';
+import { Order } from 'src/order/order.entity';
+import { MAPPER_MODULE_PROVIDER } from 'src/app/app.constants';
+import { mapperMockFactory } from 'src/test-utils/mapper-mock.factory';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { VoucherProduct } from 'src/voucher-product/voucher-product.entity';
+import { Product } from 'src/product/product.entity';
+import { ProductUtils } from 'src/product/product.utils';
+import { PaymentUtils } from 'src/payment/payment.utils';
+import { Payment } from 'src/payment/entity/payment.entity';
+import { BankTransferStrategy } from 'src/payment/strategy/bank-transfer.strategy';
+import { ACBConnectorClient } from 'src/acb-connector/acb-connector.client';
+import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
+import { SystemConfigService } from 'src/system-config/system-config.service';
+import { ACBConnectorConfig } from 'src/acb-connector/acb-connector.entity';
+import { SystemConfig } from 'src/system-config/system-config.entity';
+import { Invoice } from 'src/invoice/invoice.entity';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
+import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
+import { AccumulatedPointTransactionHistory } from 'src/accumulated-point/entities/accumulated-point-transaction-history.entity';
+
+describe('VoucherGroupController', () => {
+  let controller: VoucherGroupController;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [VoucherGroupController],
+      providers: [
+        VoucherGroupService,
+        VoucherGroupScheduler,
+        VoucherGroupUtils,
+        TransactionManagerService,
+        VoucherUtils,
+        OrderUtils,
+        UserUtils,
+        MenuUtils,
+        MenuItemUtils,
+        ProductUtils,
+        PaymentUtils,
+        BankTransferStrategy,
+        ACBConnectorClient,
+        ConfigService,
+        HttpService,
+        SystemConfigService,
+        { provide: DataSource, useFactory: dataSourceMockFactory },
+        {
+          provide: getRepositoryToken(VoucherGroup),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Payment),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(ACBConnectorConfig),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(SystemConfig),
+          useValue: repositoryMockFactory,
+        },
+        {
+          provide: 'AXIOS_INSTANCE_TOKEN',
+          useValue: {
+            get: jest.fn(),
+            post: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(User),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Voucher),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Menu),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(MenuItem),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Order),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: MAPPER_MODULE_PROVIDER,
+          useFactory: mapperMockFactory,
+        },
+        {
+          provide: WINSTON_MODULE_NEST_PROVIDER,
+          useValue: console,
+        },
+        {
+          provide: getRepositoryToken(VoucherProduct),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Product),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Invoice),
+          useValue: repositoryMockFactory,
+        },
+        AccumulatedPointService,
+        {
+          provide: getRepositoryToken(AccumulatedPoint),
+          useValue: repositoryMockFactory,
+        },
+        {
+          provide: getRepositoryToken(AccumulatedPointTransactionHistory),
+          useValue: repositoryMockFactory,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: {
+            emit: jest.fn(), // Mock the emit method
+          },
+        },
+      ],
+    }).compile();
+
+    controller = module.get<VoucherGroupController>(VoucherGroupController);
+  });
+
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
+  });
+});

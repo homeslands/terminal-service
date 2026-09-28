@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phiếu bàn giao đơn hàng thẻ quà tặng</title>
+  <% var dir=process.cwd() %>
+    <style>
+      <%- include(dir + '/public/css/tailwind.min.css') %>
+    </style>
+    <style>
+      .text-xxs {
+        font-size: 0.65rem;
+      }
+    </style>
+</head>
+
+<body>
+  <div class="p-2">
+    <div class="mb-1">
+      <div class="flex items-center justify-center">
+        <img src="<%= logoUri %>" alt="" class="w-52">
+      </div>
+    </div>
+
+    <div class="text-center mt-2">
+      <h2 class="font-bold uppercase text-xl">Thống kê doanh thu</h2>
+    </div>
+
+    <div class="mt-2">
+      <div class="p-2">
+        <label class="block" for=""><span class="font-bold">Doanh thu từ ngày:</span>
+          <%= formatDate(shiftStartTime, 'HH:mm:ss DD/MM/YYYY' ) %>
+        </label>
+        <label class="block" for=""><span class="font-bold">Doanh thu đến ngày:</span>
+          <%= formatDate(shiftEndTime, 'HH:mm:ss DD/MM/YYYY' ) %>
+        </label>
+      </div>
+    </div>
+
+    <!-- Bar chart -->
+    <div class="mt-2">
+      <div class="p-2">
+        <h3 class="font-bold">Biểu đồ doanh thu</h3>
+        <canvas id="bar-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Pie charts -->
+    <div class="mt-2">
+      <div class="grid grid-cols-2 gap-4 p-2">
+        <div class="p-2">
+          <h3 class="font-bold">Doanh thu theo phương thức thanh toán</h3>
+          <canvas id="pie-chart-1"></canvas>
+        </div>
+
+        <div class="p-2">
+          <h3 class="font-bold">Biểu đồ theo loại đơn hàng</h3>
+          <canvas id="pie-chart-2"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="mt-2">
+      <div class="p-2">
+        <!-- <h3 class="font-bold">Bảng doanh thu chi tiết</h3> -->
+        <table class="min-w-full text-sm border-collapse table-auto">
+          <thead>
+            <tr class="border-b border-black bg-white-100">
+              <th class="py-2 border border-black text-center uppercase font-extrabold" colspan="10">Bảng doanh thu chi
+                tiết
+              </th>
+            </tr>
+            <tr class="border-b border-black bg-white-100">
+              <th class="py-2 border border-black text-center font-bold">Ngày</th>
+              <th class="px-1 py-2 border border-black text-center font-bold">Tổng tiền</th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Đơn thanh toán ngân hàng</span>
+                <br>
+                <span>(đơn)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Tiền thanh toán ngân hàng</span>
+                <br>
+                <span>(đ)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Đơn thanh toán tiền mặt</span>
+                <br>
+                <span>(đơn)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Tiền thanh toán tiền mặt</span>
+                <br>
+                <span>(đ)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Tổng đơn</span>
+                <br>
+                <span>(đơn)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Đơn nạp cho bản thân</span>
+                <br>
+                <span>(đơn)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Đơn nạp cho người khác</span>
+                <br>
+                <span>(đơn)</span>
+              </th>
+              <th class="px-2 py-2 border border-black text-center font-bold">
+                <span>Đơn mua thẻ quà tặng</span>
+                <br>
+                <span>(đơn)</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <% results.forEach(function(item) { %>
+              <tr class="border-b border-black hover:bg-gray-50">
+                <td class="py-2 border border-black text-xs text-left">
+                  <%= formatDate(item.date, 'HH:mm:ss DD/MM/YYYY' ) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.totalRevenue) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= item.totalCardOrdersByBank %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.bankRevenue) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= item.totalCardOrdersByCash %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.cashRevenue) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.totalCardOrders) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.selfTopupOrderCount) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.giftTopupOrderCount) %>
+                </td>
+                <td class="px-1 py-2 border border-black text-xs text-right">
+                  <%= formatCurrency(item.cardPurchaseOrderCount) %>
+                </td>
+              </tr>
+              <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Timestamp -->
+    <div class="text-xxs text-center mt-2">
+      <p>In vào lúc:</p>
+      <p>
+        <%= formatDate(createdAt, 'HH:mm:ss DD/MM/YYYY' ) %>
+      </p>
+    </div>
+
+    <% var bankRevenueValue=bankRevenue; %>
+      <% var cashRevenueValue=cashRevenue; %>
+        <% var totalRevenueValue=totalRevenue; %>
+          <% var selfTopupOrderCountVal=selfTopupOrderCount; %>
+            <% var giftTopupOrderCountVal=giftTopupOrderCount; %>
+              <% var cardPurchaseOrderCountVal=cardPurchaseOrderCount; %>
+                <% var totalCardOrdersVal=totalCardOrders; %>
+                  <% var datesVal=dates; %>
+                    <% var revenueVal=revenues; %>
+                      <% var ordersVal=orders; %>
+
+                        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                        <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+                        <script>
+
+                          function formatVND(value) {
+                            return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " đ";
+                          }
+
+                          const bankRevenueValue = "<%= bankRevenueValue  %>";
+                          const cashRevenueValue = "<%= cashRevenueValue  %>";
+                          const totalRevenueValue = "<%= totalRevenueValue  %>";
+                          const selfTopupOrderCountVal = "<%= selfTopupOrderCountVal  %>";
+                          const giftTopupOrderCountVal = "<%= giftTopupOrderCountVal  %>";
+                          const cardPurchaseOrderCountVal = "<%= cardPurchaseOrderCountVal  %>";
+                          const totalCardOrdersVal = "<%= totalCardOrdersVal  %>";
+                          const datesValStr = "<%= datesVal  %>";
+                          const revenueValStr = "<%= revenueVal  %>";
+                          const ordersValStr = "<%= ordersVal  %>";
+                          const datesVal = datesValStr.split(',')
+                          const revenueVal = revenueValStr.split(',').map(item => Number(item));
+                          const ordersVal = ordersValStr.split(',').map(item => Number(item));
+
+                          const barChartCtx = document.getElementById('bar-chart');
+                          new Chart(barChartCtx, {
+                            data: {
+                              labels: datesVal,
+                              datasets: [
+                                {
+                                  label: "Doanh thu",
+                                  data: revenueVal,
+                                  type: 'line',
+                                  yAxisID: 'yRevenue',
+                                  tension: 0.3
+                                },
+                                {
+                                  label: 'Đơn hàng',
+                                  data: ordersVal,
+                                  type: 'bar',
+                                  yAxisID: 'yOrders'
+                                }
+                              ]
+                            },
+                            options: {
+                              responsive: true,
+                              plugins: {
+                                title: {
+                                  display: true,
+                                  text: 'Doanh thu & đơn hàng theo thời gian'
+                                },
+                                tooltip: {
+                                  callbacks: {
+                                    label: (ctx) => {
+                                      if (ctx.dataset.yAxisID === 'yRevenue') {
+                                        return `Doanh thu: ${formatVND(ctx.raw)}`;
+                                      }
+                                      return `Đơn hàng: ${ctx.raw}`;
+                                    }
+                                  }
+                                }
+                              },
+                              scales: {
+                                x: {
+                                  title: {
+                                    display: true,
+                                    text: 'Ngày'
+                                  },
+                                  ticks: {
+                                    maxRotation: 90,
+                                    minRotation: 45
+                                  }
+                                },
+                                yRevenue: {
+                                  type: 'linear',
+                                  position: 'left',
+                                  normalized: false,
+                                  title: {
+                                    display: true,
+                                    text: 'Doanh thu (VND)'
+                                  },
+                                  // ticks: {
+                                  //   callback: value => formatVND(value)
+                                  // }
+                                },
+                                yOrders: {
+                                  type: 'linear',
+                                  position: 'right',
+                                  title: {
+                                    display: true,
+                                    text: 'Đơn hàng'
+                                  },
+                                  grid: {
+                                    drawOnChartArea: false
+                                  }
+                                }
+                              }
+                            }
+                          });
+
+                          const pieChart1 = document.getElementById('pie-chart-1');
+                          new Chart(pieChart1, {
+                            type: 'pie',
+                            data: {
+                              labels: ['Tiền mặt', 'chuyển khoản'],
+                              datasets: [{
+                                data: [cashRevenueValue, bankRevenueValue],
+                                backgroundColor: ['#ef4444', '#3b82f6']
+                              }]
+                            },
+                            options: {
+                              plugins: {
+                                datalabels: {
+                                  color: '#fff',
+                                  font: {
+                                    weight: 'bold',
+                                    size: 14
+                                  },
+                                  formatter: (value, ctx) => {
+
+                                    const percentage = (value / totalRevenueValue * 100).toFixed(1) + '%';
+                                    return `${formatVND(value)} (${percentage})`;
+                                  }
+                                },
+                              },
+                            },
+                            plugins: [ChartDataLabels]
+                          });
+
+                          const pieChart2 = document.getElementById('pie-chart-2');
+                          new Chart(pieChart2, {
+                            type: 'pie',
+                            data: {
+                              labels: ['Nạp cho bản thân', 'Nạp cho người khác', 'Mua thẻ quà tặng'],
+                              datasets: [{
+                                data: [selfTopupOrderCountVal, giftTopupOrderCountVal, cardPurchaseOrderCountVal],
+                                backgroundColor: ["#4CAF50", "#2196F3", "#FF9800"]
+                              }]
+                            },
+                            options: {
+                              plugins: {
+                                datalabels: {
+                                  color: '#fff',
+                                  font: {
+                                    weight: 'bold',
+                                    size: 14
+                                  },
+                                  formatter: (value, ctx) => {
+
+                                    const percentage = (value / totalCardOrdersVal * 100).toFixed(1) + '%';
+                                    return `${value} đơn (${percentage})`;
+                                  }
+                                },
+                              },
+                            },
+                            plugins: [ChartDataLabels]
+                          });
+                        </script>
+</body>
+
+</html>

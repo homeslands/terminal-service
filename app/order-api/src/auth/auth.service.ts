@@ -1,0 +1,2279 @@
+import {
+  Inject,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import {
+  AuthChangePasswordRequestDto,
+  AuthJwtPayload,
+  AuthProfileResponseDto,
+  AuthRefreshRequestDto,
+  CompleteRegisterRequestDto,
+  DeleteAccountRequestDto,
+  ForgotPasswordRequestDto,
+  ForgotPasswordTokenRequestDto,
+  InitiateRegisterRequestDto,
+  InitiateRegisterResponseDto,
+  LoginAuthRequestDto,
+  LoginAuthResponseDto,
+  RegisterAuthRequestDto,
+  RegisterAuthResponseDto,
+  ResendRegisterOtpRequestDto,
+  UpdateAuthProfileRequestDto,
+  InitiateVerifyEmailRequestDto,
+  ConfirmEmailVerificationCodeRequestDto,
+  VerifyEmailResponseDto,
+  VerifyPhoneNumberResponseDto,
+  ConfirmPhoneNumberVerificationCodeRequestDto,
+  ForgotPasswordResponseDto,
+  ConfirmForgotPasswordRequestDto,
+  ConfirmForgotPasswordResponseDto,
+  ChangeForgotPasswordRequestDto,
+} from './auth.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { User } from 'src/user/user.entity';
+import { IsNull, MoreThan, Not, Repository } from 'typeorm';
+import * as bcrypt from 'bcrypt';
+import { ConfigService } from '@nestjs/config';
+import { InjectMapper } from '@automapper/nestjs';
+import { Mapper } from '@automapper/core';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { AuthException } from './auth.exception';
+import {
+  AuthValidation,
+  FORGOT_TOKEN_EXPIRED,
+  INVALID_OLD_PASSWORD,
+} from './auth.validation';
+import moment from 'moment';
+import { v4 as uuidv4 } from 'uuid';
+import { Branch } from 'src/branch/branch.entity';
+import { BranchValidation } from 'src/branch/branch.validation';
+import { BranchException } from 'src/branch/branch.exception';
+import { FileService } from 'src/file/file.service';
+import { MailService } from 'src/mail/mail.service';
+import { ForgotPasswordToken } from './entity/forgot-password-token.entity';
+import { CurrentUserDto } from 'src/user/user.dto';
+import { Role } from 'src/role/role.entity';
+import { RoleEnum } from 'src/role/role.enum';
+import { SystemConfigService } from 'src/system-config/system-config.service';
+import { SystemConfigKey } from 'src/system-config/system-config.constant';
+import { RoleException } from 'src/role/role.exception';
+import { RoleValidation } from 'src/role/role.validation';
+import { VerifyEmailToken } from './entity/verify-email-token.entity';
+import { TransactionManagerService } from 'src/db/transaction-manager.service';
+import { AuthUtils, checkActiveUser, checkUserRequirement } from './auth.utils';
+import { UserUtils } from 'src/user/user.utils';
+import { getRandomString } from 'src/helper';
+import { VerifyPhoneNumberToken } from './entity/verify-phone-number-token.entity';
+import { RegisterOtpToken } from './entity/register-otp-token.entity';
+import { ZaloOaConnectorClient } from 'src/zalo-oa-connector/zalo-oa-connector.client';
+import {
+  SmsDataRequestDto,
+  ZaloDataRequestDto,
+  ZaloOaInitiateSmsByMultiChannelMessageRequestDto,
+  ZaloOaInitiateSmsResponseDto,
+} from 'src/zalo-oa-connector/zalo-oa-connector.dto';
+import {
+  fillResetPasswordContent,
+  fillVerifyAccountContent,
+  SMSChannel,
+  ZaloOaStrategy,
+} from 'src/zalo-oa-connector/zalo-oa-connector.constants';
+import { ZaloOaConnectorConfig } from 'src/zalo-oa-connector/entity/zalo-oa-connector.entity';
+import { ZaloOaConnectorException } from 'src/zalo-oa-connector/zalo-oa-connector.exception';
+import { ZaloOaConnectorValidation } from 'src/zalo-oa-connector/zalo-oa-connector.validation';
+import { ZaloOaConnectorHistory } from 'src/zalo-oa-connector/entity/zalo-oa-connector-history.entity';
+import { VerificationMethod } from './auth.constants';
+import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
+import { UserRequirement } from 'src/user/user-requirement.entity';
+import {
+  UserRequirementKey,
+  UserRequirementLevel,
+  UserRequirementScope,
+  UserRequirementStatus,
+} from 'src/user/user.constant';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CampaignAction } from 'src/campaign/campaign.constants';
+
+@Injectable()
+export class AuthService {
+  private saltOfRounds: number;
+  private duration: number;
+  private refeshableDuration: number;
+  private zaloOaApiKey: string;
+  private zaloOaSecretKey: string;
+  private zaloOaId: string;
+
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(Branch)
+    private readonly branchRepository: Repository<Branch>,
+    @InjectRepository(Role)
+    private readonly roleRepository: Repository<Role>,
+    @InjectMapper()
+    private readonly mapper: Mapper,
+    @Inject(WINSTON_MODULE_NEST_PROVIDER)
+    private readonly logger: Logger,
+    @InjectRepository(ForgotPasswordToken)
+    private readonly forgotPasswordRepository: Repository<ForgotPasswordToken>,
+    @InjectRepository(VerifyEmailToken)
+    private readonly verifyEmailRepository: Repository<VerifyEmailToken>,
+    @InjectRepository(VerifyPhoneNumberToken)
+    private readonly verifyPhoneNumberRepository: Repository<VerifyPhoneNumberToken>,
+    @InjectRepository(RegisterOtpToken)
+    private readonly registerOtpTokenRepository: Repository<RegisterOtpToken>,
+    private readonly fileService: FileService,
+    private readonly mailService: MailService,
+    private readonly systemConfigService: SystemConfigService,
+    private readonly transactionManagerService: TransactionManagerService,
+    private readonly authUtils: AuthUtils,
+    private readonly userUtils: UserUtils,
+    private readonly zaloOaConnectorClient: ZaloOaConnectorClient,
+    @InjectRepository(ZaloOaConnectorConfig)
+    private readonly zaloOaConnectorConfigRepository: Repository<ZaloOaConnectorConfig>,
+    private readonly sharedBalanceService: SharedBalanceService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {
+    this.saltOfRounds = this.configService.get<number>('SALT_ROUNDS');
+    this.duration = this.configService.get<number>('DURATION');
+    this.refeshableDuration = this.configService.get<number>(
+      'REFRESHABLE_DURATION',
+    );
+    this.zaloOaApiKey = this.configService.get<string>('ZALO_OA_API_KEY');
+    this.zaloOaSecretKey = this.configService.get<string>('ZALO_OA_SECRET_KEY');
+    this.zaloOaId = this.configService.get<string>('ZALO_OA_ID');
+  }
+
+  private isTodayBirthday(dobDM: string): boolean {
+    const today = new Date();
+    const todayDM = `${String(today.getDate()).padStart(2, '0')}${String(today.getMonth() + 1).padStart(2, '0')}`;
+    return dobDM === todayDM;
+  }
+
+  async getZaloOaConnectorConfig(
+    strategy: string,
+  ): Promise<ZaloOaConnectorConfig> {
+    const context = `${AuthService.name}.${this.getZaloOaConnectorConfig.name}`;
+    const zaloOaConnectorConfig =
+      await this.zaloOaConnectorConfigRepository.findOne({
+        where: {
+          strategy,
+        },
+      });
+    if (!zaloOaConnectorConfig) {
+      this.logger.error(
+        `Zalo OA connector config not found for strategy ${ZaloOaStrategy.VERIFY_ACCOUNT}`,
+        null,
+        context,
+      );
+      throw new ZaloOaConnectorException(
+        ZaloOaConnectorValidation.ZALO_OA_CONNECTOR_CONFIG_NOT_FOUND,
+      );
+    }
+    return zaloOaConnectorConfig;
+  }
+
+  /**
+   *  Retrieves the frontend URL configuration.
+   *
+   * This method fetches the frontend URL from the system configuration
+   * service using the predefined `SystemConfigKey.FRONTEND_URL` key.
+   * @returns {Promise<string>} The frontend URL as a string
+   */
+  async getFrontendUrl(): Promise<string> {
+    const context = `${AuthService.name}.${this.getFrontendUrl.name}`;
+    this.logger.log(`Get frontend url`, context);
+    const url = await this.systemConfigService.get(
+      SystemConfigKey.FRONTEND_URL,
+    );
+    if (!url) {
+      this.logger.error(`Frontend URL not found`, context);
+    }
+
+    return url;
+  }
+
+  /**
+   * Handles the forgot password
+   *
+   * This method verifies the provided forgot password token and updates the user's password
+   * if the token is valid and has not expired. After successfully updating the password,
+   * the token is marked as expired.
+   *
+   * @param {ForgotPasswordRequestDto} requestData - The data required for processing the forgot password request.
+   * @returns {Promise<number>} A promise that resolves to `0` if the forgot password process executes successfully.
+   * @throws {AuthException} Throws exception if the token is expired, invalid, or the user does not exist.
+   */
+  async forgotPassword(requestData: ForgotPasswordRequestDto): Promise<number> {
+    const context = `${AuthService.name}.${this.forgotPassword.name}`;
+    const existToken = await this.forgotPasswordRepository.findOne({
+      where: {
+        token: requestData.token,
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+    if (!existToken) {
+      this.logger.warn(`Forgot token is not existed`, context);
+      throw new AuthException(
+        AuthValidation.FORGOT_TOKEN_EXPIRED,
+        FORGOT_TOKEN_EXPIRED,
+      );
+    }
+
+    // Verify token
+    let isExpiredToken = false;
+    try {
+      this.jwtService.verify(requestData.token);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (error) {
+      isExpiredToken = true;
+    }
+    if (isExpiredToken) {
+      this.logger.warn(`Forgot token is expired`, context);
+      throw new AuthException(
+        AuthValidation.FORGOT_TOKEN_EXPIRED,
+        FORGOT_TOKEN_EXPIRED,
+      );
+    }
+
+    // Get payload
+    const payload: AuthJwtPayload = this.jwtService.decode(requestData.token);
+    this.logger.log(`Payload: ${JSON.stringify(payload)}`);
+
+    const user = await this.userUtils.getUser({
+      where: {
+        id: payload.sub,
+      },
+    });
+
+    const hashedPass = await bcrypt.hash(
+      requestData.newPassword,
+      this.saltOfRounds,
+    );
+
+    user.password = hashedPass;
+    await this.userRepository.save(user);
+    this.logger.log(`User ${user.id} has been updated password`, context);
+
+    // Set token expired after forgot password successfully
+    existToken.expiresAt = new Date(Date.now() - 120000); // Set expiry time to the past
+    await this.forgotPasswordRepository.save(existToken);
+    this.logger.log(`Token ${existToken.token} is expired`, context);
+
+    return 0;
+  }
+
+  /**
+   * Handles the creation of a forgot password token
+   *
+   * This method create forgot password token base on user id. After the token created successfully,
+   * It's assigned with the frontend URL and returned to the client through email
+   *
+   * @param {ForgotPasswordTokenRequestDto} requestData The data required for processing the creation password token
+   * @returns {Promise<string>} Return URL to help client forgot password
+   * @throws {AuthException} throws exception if user not found, token is invalid
+   */
+  async createForgotPasswordToken(
+    requestData: ForgotPasswordTokenRequestDto,
+  ): Promise<ForgotPasswordResponseDto> {
+    const context = `${AuthService.name}.${this.createForgotPasswordToken.name}`;
+
+    let user: User;
+    if (requestData.verificationMethod === VerificationMethod.EMAIL) {
+      if (!requestData.email) {
+        throw new AuthException(AuthValidation.INVALID_EMAIL);
+      }
+
+      user = await this.userUtils.getUser({
+        where: {
+          email: requestData.email,
+        },
+      });
+
+      // if (!user.isVerifiedEmail) {
+      //   this.logger.warn(`User ${user.id} not verified email`, context);
+      //   throw new AuthException(AuthValidation.USER_NOT_VERIFIED_EMAIL);
+      // }
+    } else if (
+      requestData.verificationMethod === VerificationMethod.PHONE_NUMBER
+    ) {
+      if (!requestData.phonenumber) {
+        throw new AuthException(AuthValidation.INVALID_PHONENUMBER);
+      }
+
+      user = await this.userUtils.getUser({
+        where: {
+          phonenumber: requestData.phonenumber,
+        },
+      });
+
+      // if (!user.isVerifiedPhonenumber) {
+      //   this.logger.warn(`User ${user.id} not verified phone number`, context);
+      //   throw new AuthException(AuthValidation.USER_NOT_VERIFIED_PHONENUMBER);
+      // }
+    }
+
+    const existingToken = await this.forgotPasswordRepository.findOne({
+      where: {
+        user: {
+          id: user.id,
+        },
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+
+    if (existingToken) {
+      this.logger.warn(`User ${user.id} already has a valid token`, context);
+      throw new AuthException(AuthValidation.FORGOT_TOKEN_EXISTS);
+    }
+
+    const token = getRandomString().slice(0, 6).toUpperCase();
+    const forgotPasswordToken = new ForgotPasswordToken();
+    Object.assign(forgotPasswordToken, {
+      expiresAt: moment()
+        .add(60 * 10, 'seconds')
+        .toDate(),
+      token,
+      user,
+    });
+
+    const result =
+      await this.transactionManagerService.execute<ForgotPasswordToken>(
+        async (manager) => {
+          if (requestData.verificationMethod === VerificationMethod.EMAIL) {
+            await this.mailService.sendForgotPasswordToken(
+              user,
+              token,
+              moment(forgotPasswordToken.expiresAt).format('DD/MM/YYYY HH:mm'),
+            );
+            const createdToken = await manager.save(forgotPasswordToken);
+            return createdToken;
+          } else if (
+            requestData.verificationMethod === VerificationMethod.PHONE_NUMBER
+          ) {
+            const zaloOaConnectorConfig = await this.getZaloOaConnectorConfig(
+              ZaloOaStrategy.RESET_PASSWORD,
+            );
+
+            const backendUrl = await this.getBackendUrl();
+            const expiresTime = moment(forgotPasswordToken.expiresAt).format(
+              'HH:mm DD/MM/YYYY',
+            );
+            const requestIdZns = getRandomString();
+            const requestIdSms = getRandomString();
+
+            const zaloOaInitiateSmsByMultiChannelMessageRequestDto =
+              new ZaloOaInitiateSmsByMultiChannelMessageRequestDto();
+            zaloOaInitiateSmsByMultiChannelMessageRequestDto.ApiKey =
+              this.zaloOaApiKey;
+            zaloOaInitiateSmsByMultiChannelMessageRequestDto.SecretKey =
+              this.zaloOaSecretKey;
+            zaloOaInitiateSmsByMultiChannelMessageRequestDto.Phone =
+              user.phonenumber;
+            zaloOaInitiateSmsByMultiChannelMessageRequestDto.Channels = [
+              SMSChannel.ZALO,
+              SMSChannel.SMS,
+            ];
+
+            zaloOaInitiateSmsByMultiChannelMessageRequestDto.Data = [
+              {
+                TempID: zaloOaConnectorConfig.templateId,
+                Params: [token, expiresTime],
+                OAID: this.zaloOaId,
+                campaignid: zaloOaConnectorConfig.strategy,
+                CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+                RequestId: requestIdZns,
+                Sandbox: '0',
+                SendingMode: '1',
+              } as ZaloDataRequestDto,
+              {
+                Content: fillResetPasswordContent(token, expiresTime),
+                IsUnicode: '0',
+                SmsType: '2',
+                Brandname: 'TrendCoffee',
+                CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+                RequestId: requestIdSms,
+                Sandbox: '0',
+              } as SmsDataRequestDto,
+            ];
+
+            const zaloOaInitiateResponse: ZaloOaInitiateSmsResponseDto =
+              await this.zaloOaConnectorClient.initiateForgotPasswordSmsByMultiChannelMessage(
+                zaloOaInitiateSmsByMultiChannelMessageRequestDto,
+              );
+
+            if (zaloOaInitiateResponse.ErrorMessage) {
+              this.logger.error(
+                `Error when initiate sms verify account: ${zaloOaInitiateResponse.ErrorMessage}`,
+                context,
+              );
+              throw new ZaloOaConnectorException(
+                ZaloOaConnectorValidation.ERROR_INITIATE_SMS_VERIFY_ACCOUNT,
+              );
+            }
+
+            const createdToken = await manager.save(forgotPasswordToken);
+            if (zaloOaInitiateResponse.SMSID) {
+              const zaloOaConnectorHistory = new ZaloOaConnectorHistory();
+              Object.assign(zaloOaConnectorHistory, {
+                tokenId: createdToken.id,
+                smsId: zaloOaInitiateResponse.SMSID,
+                requestId: `${requestIdZns}-${requestIdSms}`,
+                templateId: zaloOaConnectorConfig.templateId,
+                strategy: zaloOaConnectorConfig.strategy,
+              });
+
+              await manager.save(zaloOaConnectorHistory);
+            }
+            return createdToken;
+          }
+        },
+        () => {
+          this.logger.log(
+            `User ${user.firstName} ${user.lastName} created forgot password token`,
+            context,
+          );
+        },
+        (error) => {
+          this.logger.error(
+            `Error when create forgot password token`,
+            error.stack,
+            context,
+          );
+          throw new AuthException(
+            AuthValidation.ERROR_CREATE_FORGOT_PASSWORD_TOKEN,
+          );
+        },
+      );
+
+    return this.mapper.map(
+      result,
+      ForgotPasswordToken,
+      ForgotPasswordResponseDto,
+    );
+  }
+
+  async resendForgotPasswordToken(
+    requestData: ForgotPasswordTokenRequestDto,
+  ): Promise<VerifyPhoneNumberResponseDto> {
+    const context = `${AuthService.name}.${this.resendForgotPasswordToken.name}`;
+    this.logger.log(`Request resend forgot password code}`, context);
+
+    let user: User;
+    if (requestData.verificationMethod === VerificationMethod.EMAIL) {
+      if (!requestData.email) {
+        throw new AuthException(AuthValidation.INVALID_EMAIL);
+      }
+
+      user = await this.userUtils.getUser({
+        where: {
+          email: requestData.email,
+        },
+      });
+
+      // if (!user.isVerifiedEmail) {
+      //   this.logger.warn(`User ${user.id} not verified email`, context);
+      //   throw new AuthException(AuthValidation.USER_NOT_VERIFIED_EMAIL);
+      // }
+    } else if (
+      requestData.verificationMethod === VerificationMethod.PHONE_NUMBER
+    ) {
+      if (!requestData.phonenumber) {
+        throw new AuthException(AuthValidation.INVALID_PHONENUMBER);
+      }
+
+      user = await this.userUtils.getUser({
+        where: {
+          phonenumber: requestData.phonenumber,
+        },
+      });
+
+      // if (!user.isVerifiedPhonenumber) {
+      //   this.logger.warn(`User ${user.id} not verified phone number`, context);
+      //   throw new AuthException(AuthValidation.USER_NOT_VERIFIED_PHONENUMBER);
+      // }
+    }
+
+    const existingToken: ForgotPasswordToken =
+      await this.forgotPasswordRepository.findOne({
+        where: {
+          user: {
+            id: user.id,
+          },
+          expiresAt: MoreThan(new Date()),
+        },
+      });
+    if (!existingToken) {
+      this.logger.warn(`Verify phone number token is not existed`, context);
+      throw new AuthException(
+        AuthValidation.VERIFY_PHONE_NUMBER_TOKEN_NOT_FOUND,
+      );
+    }
+
+    if (requestData.verificationMethod === VerificationMethod.EMAIL) {
+      await this.mailService.sendForgotPasswordToken(
+        user,
+        existingToken.token,
+        moment(existingToken.expiresAt).format('DD/MM/YYYY HH:mm'),
+      );
+      this.logger.log(
+        `User ${user.firstName} ${user.lastName} resend forgot password token by email`,
+        context,
+      );
+    }
+
+    if (requestData.verificationMethod === VerificationMethod.PHONE_NUMBER) {
+      await this.transactionManagerService.execute<void>(
+        async (manager) => {
+          const zaloOaConnectorConfig = await this.getZaloOaConnectorConfig(
+            ZaloOaStrategy.RESET_PASSWORD,
+          );
+
+          const backendUrl = await this.getBackendUrl();
+          const expiresTime = moment(existingToken.expiresAt).format(
+            'HH:mm DD/MM/YYYY',
+          );
+          const requestIdZns = getRandomString();
+          const requestIdSms = getRandomString();
+
+          const zaloOaInitiateSmsByMultiChannelMessageRequestDto =
+            new ZaloOaInitiateSmsByMultiChannelMessageRequestDto();
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.ApiKey =
+            this.zaloOaApiKey;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.SecretKey =
+            this.zaloOaSecretKey;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Phone =
+            user.phonenumber;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Channels = [
+            SMSChannel.ZALO,
+            SMSChannel.SMS,
+          ];
+
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Data = [
+            {
+              TempID: zaloOaConnectorConfig.templateId,
+              Params: [existingToken.token, expiresTime],
+              OAID: this.zaloOaId,
+              campaignid: zaloOaConnectorConfig.strategy,
+              CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+              RequestId: requestIdZns,
+              Sandbox: '0',
+              SendingMode: '1',
+            } as ZaloDataRequestDto,
+            {
+              Content: fillResetPasswordContent(
+                existingToken.token,
+                expiresTime,
+              ),
+              IsUnicode: '0',
+              SmsType: '2',
+              Brandname: 'TrendCoffee',
+              CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+              RequestId: requestIdSms,
+              Sandbox: '0',
+            } as SmsDataRequestDto,
+          ];
+
+          const zaloOaInitiateResponse: ZaloOaInitiateSmsResponseDto =
+            await this.zaloOaConnectorClient.initiateVerifyPhoneNumberSmsByMultiChannelMessage(
+              zaloOaInitiateSmsByMultiChannelMessageRequestDto,
+            );
+
+          if (zaloOaInitiateResponse.ErrorMessage) {
+            this.logger.error(
+              `Error when initiate forgot password sms: ${zaloOaInitiateResponse.ErrorMessage}`,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.ERROR_INITIATE_SMS_FORGOT_PASSWORD,
+            );
+          }
+
+          if (zaloOaInitiateResponse.SMSID) {
+            const zaloOaConnectorHistory = new ZaloOaConnectorHistory();
+            Object.assign(zaloOaConnectorHistory, {
+              tokenId: existingToken.id,
+              smsId: zaloOaInitiateResponse.SMSID,
+              requestId: `${requestIdZns}-${requestIdSms}`,
+              templateId: zaloOaConnectorConfig.templateId,
+              strategy: zaloOaConnectorConfig.strategy,
+            });
+
+            await manager.save(zaloOaConnectorHistory);
+          }
+        },
+        () => {
+          this.logger.log(
+            `User ${user.firstName} ${user.lastName} resend forgot password token by phone number`,
+            context,
+          );
+        },
+        (error) => {
+          this.logger.error(
+            `Error when resend forgot password token by phone number`,
+            error.stack,
+            context,
+          );
+          throw new AuthException(
+            AuthValidation.ERROR_CREATE_FORGOT_PASSWORD_TOKEN,
+          );
+        },
+      );
+    }
+
+    return this.mapper.map(
+      existingToken,
+      ForgotPasswordToken,
+      ForgotPasswordResponseDto,
+    );
+  }
+
+  async confirmForgotPassword(
+    requestData: ConfirmForgotPasswordRequestDto,
+  ): Promise<ConfirmForgotPasswordResponseDto> {
+    const context = `${AuthService.name}.${this.confirmForgotPassword.name}`;
+    this.logger.log(`Request confirm forgot password`, context);
+
+    const existToken = await this.forgotPasswordRepository.findOne({
+      where: {
+        token: requestData.code,
+        // expiresAt: MoreThan(new Date()),
+      },
+      relations: {
+        user: true,
+      },
+    });
+    if (!existToken) {
+      this.logger.warn(`Forgot token is not existed`, context);
+      throw new AuthException(AuthValidation.FORGOT_TOKEN_NOT_EXISTED);
+    }
+    if (existToken.expiresAt < new Date()) {
+      this.logger.warn(
+        `Forgot token is expired: ${existToken.expiresAt}`,
+        context,
+      );
+      throw new AuthException(AuthValidation.FORGOT_TOKEN_EXPIRED);
+    }
+    if (!existToken.user) {
+      this.logger.warn(`User is not existed`, context);
+      throw new AuthException(AuthValidation.USER_NOT_FOUND);
+    }
+
+    const payload: AuthJwtPayload = { sub: existToken.user.id, jti: uuidv4() };
+    const expiresIn = 5 * 60; // 5 minutes
+    const now = new Date();
+    const token = this.jwtService.sign(payload, {
+      expiresIn: expiresIn,
+    });
+
+    // Set code expired after forgot password successfully
+    existToken.expiresAt = new Date(Date.now() - 120000); // Set expiry time to the past
+
+    const tokenToChangePassword = new ForgotPasswordToken();
+    tokenToChangePassword.token = payload.jti;
+    tokenToChangePassword.expiresAt = new Date(
+      now.getTime() + expiresIn * 1000,
+    );
+    tokenToChangePassword.user = existToken.user;
+
+    await this.transactionManagerService.execute<void>(
+      async (manager) => {
+        await manager.save(existToken);
+        await manager.save(tokenToChangePassword);
+      },
+      () => {
+        this.logger.log(
+          `Token change password for user ${existToken.user.slug} is created`,
+          context,
+        );
+      },
+      (error) => {
+        this.logger.error(
+          `Error when create token to change password`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.ERROR_CREATE_TOKEN_TO_CHANGE_PASSWORD,
+        );
+      },
+    );
+
+    return {
+      token,
+    } as ConfirmForgotPasswordResponseDto;
+  }
+
+  async ChangeForgotPassword(
+    requestData: ChangeForgotPasswordRequestDto,
+  ): Promise<void> {
+    const context = `${AuthService.name}.${this.ChangeForgotPassword.name}`;
+    this.logger.log(`Request change forgot password`, context);
+
+    // Verify token
+    let isExpiredToken = false;
+    try {
+      this.jwtService.verify(requestData.token);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (error) {
+      isExpiredToken = true;
+    }
+    if (isExpiredToken) {
+      this.logger.warn(`Forgot token is expired`, context);
+      throw new AuthException(
+        AuthValidation.FORGOT_TOKEN_EXPIRED,
+        FORGOT_TOKEN_EXPIRED,
+      );
+    }
+
+    // Get payload
+    const payload: AuthJwtPayload = this.jwtService.decode(requestData.token);
+    this.logger.log(`Payload: ${JSON.stringify(payload)}`);
+
+    const tokenToChangePassword = await this.forgotPasswordRepository.findOne({
+      where: {
+        token: payload.jti,
+      },
+    });
+    if (!tokenToChangePassword) {
+      this.logger.warn(`Token change password is not existed`, context);
+      throw new AuthException(AuthValidation.FORGOT_TOKEN_EXPIRED);
+    }
+
+    const user = await this.userUtils.getUser({
+      where: {
+        id: payload.sub,
+      },
+      relations: {
+        userRequirements: true,
+      },
+    });
+
+    const hashedPass = await bcrypt.hash(
+      requestData.newPassword,
+      this.saltOfRounds,
+    );
+
+    user.password = hashedPass;
+
+    const blockedPasswordRequirement = user.userRequirements.find(
+      (requirement) =>
+        requirement.key === UserRequirementKey.NEED_UPDATE_PASSWORD &&
+        requirement.status === UserRequirementStatus.PENDING &&
+        requirement.level === UserRequirementLevel.BLOCK &&
+        requirement.scope === UserRequirementScope.INITIAL,
+    );
+    if (blockedPasswordRequirement) {
+      blockedPasswordRequirement.status = UserRequirementStatus.COMPLETED;
+    }
+
+    await this.transactionManagerService.execute<void>(
+      async (manager) => {
+        await manager.save(user);
+        await manager.remove(tokenToChangePassword);
+        if (blockedPasswordRequirement) {
+          await manager.save(blockedPasswordRequirement);
+        }
+      },
+      () => {
+        this.logger.log(`User ${user.slug} has been updated password`, context);
+      },
+      (error) => {
+        this.logger.error(
+          `Error when change forgot password`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(AuthValidation.ERROR_CHANGE_FORGOT_PASSWORD);
+      },
+    );
+  }
+
+  async initiateVerifyEmail(
+    currentUserDto: CurrentUserDto,
+    requestData: InitiateVerifyEmailRequestDto,
+  ): Promise<VerifyEmailResponseDto> {
+    const context = `${AuthService.name}.${this.initiateVerifyEmail.name}`;
+    this.logger.log(
+      `Request initiate verify email ${JSON.stringify(requestData)}`,
+      context,
+    );
+    const user = await this.userUtils.getUser({
+      where: {
+        id: currentUserDto.userId ?? IsNull(),
+        phonenumber: Not('default-customer'),
+      },
+    });
+
+    if (user.isVerifiedEmail) {
+      this.logger.warn(`User ${user.id} already verified email`, context);
+      throw new AuthException(AuthValidation.USER_ALREADY_VERIFIED_EMAIL);
+    }
+
+    const existingToken = await this.verifyEmailRepository.findOne({
+      where: {
+        user: {
+          id: user.id,
+        },
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+    if (existingToken) {
+      this.logger.warn(
+        `User ${user.id} already has a valid email token`,
+        context,
+      );
+      throw new AuthException(AuthValidation.VERIFY_EMAIL_TOKEN_ALREADY_EXISTS);
+    }
+
+    // Check email in system except current user
+    const existedEmailInSystem = await this.userRepository.findOne({
+      where: {
+        email: requestData.email,
+        id: Not(user.id),
+      },
+    });
+    if (existedEmailInSystem) {
+      this.logger.warn(AuthValidation.EMAIL_ALREADY_EXISTS.message, context);
+      throw new AuthException(AuthValidation.EMAIL_ALREADY_EXISTS);
+    }
+
+    const existedEmailCurrentUser = await this.userRepository.findOne({
+      where: {
+        email: requestData.email,
+        id: user.id,
+      },
+    });
+    if (existedEmailCurrentUser) {
+      if (user.isVerifiedEmail) {
+        this.logger.warn(
+          AuthValidation.THIS_EMAIL_ALREADY_VERIFY.message,
+          context,
+        );
+        throw new AuthException(AuthValidation.THIS_EMAIL_ALREADY_VERIFY);
+      }
+    }
+
+    const token = getRandomString().slice(0, 6).toUpperCase();
+    const verifyEmailToken = new VerifyEmailToken();
+    Object.assign(verifyEmailToken, {
+      expiresAt: moment()
+        .add(60 * 10, 'seconds')
+        .toDate(),
+      token,
+      user,
+      email: requestData.email,
+    } as VerifyEmailToken);
+
+    const result =
+      await this.transactionManagerService.execute<VerifyEmailToken>(
+        async (manager) => {
+          const createdToken = await manager.save(verifyEmailToken);
+          await this.mailService.sendVerifyEmail(
+            user,
+            token,
+            requestData.email,
+            moment(createdToken.expiresAt).format('DD/MM/YYYY HH:mm'),
+          );
+          return createdToken;
+        },
+        () => {
+          this.logger.log(
+            `User ${user.id} created initiate verify email token`,
+            context,
+          );
+        },
+        (error) => {
+          this.logger.error(
+            `Error when create initiate verify email token`,
+            error.stack,
+            context,
+          );
+          throw new AuthException(
+            AuthValidation.ERROR_CREATE_VERIFY_EMAIL_TOKEN,
+          );
+        },
+      );
+
+    return this.mapper.map(result, VerifyEmailToken, VerifyEmailResponseDto);
+  }
+
+  async resendVerifyEmailCode(
+    currentUserDto: CurrentUserDto,
+  ): Promise<VerifyEmailResponseDto> {
+    const context = `${AuthService.name}.${this.resendVerifyEmailCode.name}`;
+    this.logger.log(
+      `Request resend verify email code ${JSON.stringify(currentUserDto)}`,
+      context,
+    );
+    const user = await this.userUtils.getUser({
+      where: {
+        id: currentUserDto.userId ?? IsNull(),
+        phonenumber: Not('default-customer'),
+      },
+    });
+
+    if (user.isVerifiedEmail) {
+      this.logger.warn(`User ${user.id} already verified email`, context);
+      throw new AuthException(AuthValidation.USER_ALREADY_VERIFIED_EMAIL);
+    }
+
+    const existingToken: VerifyEmailToken =
+      await this.verifyEmailRepository.findOne({
+        where: {
+          user: {
+            id: user.id,
+          },
+          expiresAt: MoreThan(new Date()),
+        },
+      });
+    if (!existingToken) {
+      this.logger.warn(`Verify email token is not existed`, context);
+      throw new AuthException(AuthValidation.VERIFY_EMAIL_TOKEN_NOT_FOUND);
+    }
+
+    await this.mailService.sendVerifyEmail(
+      user,
+      existingToken.token,
+      existingToken.email,
+      moment(existingToken.expiresAt).format('DD/MM/YYYY HH:mm'),
+    );
+
+    return this.mapper.map(
+      existingToken,
+      VerifyEmailToken,
+      VerifyEmailResponseDto,
+    );
+  }
+
+  async confirmEmailVerificationCode(
+    currentUserDto: CurrentUserDto,
+    requestData: ConfirmEmailVerificationCodeRequestDto,
+  ): Promise<boolean> {
+    const context = `${AuthService.name}.${this.confirmEmailVerificationCode.name}`;
+
+    const user = await this.userUtils.getUser({
+      where: {
+        id: currentUserDto.userId ?? IsNull(),
+        phonenumber: Not('default-customer'),
+      },
+    });
+
+    if (user.isVerifiedEmail) {
+      this.logger.warn(`User ${user.id} already verified email`, context);
+      throw new AuthException(AuthValidation.USER_ALREADY_VERIFIED_EMAIL);
+    }
+
+    const existToken = await this.verifyEmailRepository.findOne({
+      where: {
+        token: requestData.code,
+        // expiresAt: MoreThan(new Date()),
+        user: { id: user.id },
+      },
+    });
+    if (!existToken) {
+      this.logger.warn(`Verify token is not existed`, context);
+      throw new AuthException(AuthValidation.VERIFY_EMAIL_TOKEN_NOT_FOUND);
+    }
+
+    if (new Date().getTime() > existToken.expiresAt.getTime()) {
+      this.logger.warn(
+        AuthValidation.VERIFY_EMAIL_TOKEN_IS_EXPIRED.message,
+        context,
+      );
+      throw new AuthException(AuthValidation.VERIFY_EMAIL_TOKEN_IS_EXPIRED);
+    }
+
+    user.email = existToken.email;
+    user.isVerifiedEmail = true;
+
+    // Set token expired after forgot password successfully
+    existToken.expiresAt = new Date(Date.now() - 120000); // Set expiry time to the past
+
+    await this.transactionManagerService.execute(
+      async (manager) => {
+        await manager.save(user);
+        await manager.save(existToken);
+      },
+      () => {
+        this.logger.log(
+          `User ${user.id} confirmed email verification token`,
+          context,
+        );
+      },
+      (error) => {
+        this.logger.error(
+          `Error when confirm email verification`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.CONFIRM_EMAIL_VERIFICATION_ERROR,
+        );
+      },
+    );
+
+    return true;
+  }
+
+  /**
+   *  Retrieves the frontend URL configuration.
+   *
+   * This method fetches the frontend URL from the system configuration
+   * service using the predefined `SystemConfigKey.FRONTEND_URL` key.
+   * @returns {Promise<string>} The frontend URL as a string
+   */
+  async getBackendUrl(): Promise<string> {
+    const context = `${AuthService.name}.${this.getBackendUrl.name}`;
+    this.logger.log(`Get backend url`, context);
+    const url = await this.systemConfigService.get(SystemConfigKey.BACKEND_URL);
+    if (!url) {
+      this.logger.error(`Backend URL not found`, context);
+    }
+
+    return url;
+  }
+
+  async initiateVerifyPhoneNumber(
+    currentUserDto: CurrentUserDto,
+  ): Promise<VerifyPhoneNumberResponseDto> {
+    const context = `${AuthService.name}.${this.initiateVerifyPhoneNumber.name}`;
+    this.logger.log(`Request initiate verify phone number`, context);
+    const user = await this.userUtils.getUser({
+      where: {
+        id: currentUserDto.userId ?? IsNull(),
+        phonenumber: Not('default-customer'),
+      },
+    });
+
+    if (user.isVerifiedPhonenumber) {
+      this.logger.warn(
+        `User ${user.id} already verified phone number`,
+        context,
+      );
+      throw new AuthException(AuthValidation.USER_ALREADY_VERIFIED_PHONENUMBER);
+    }
+
+    this.logger.log(`User ${user.slug} initiate verify phone number`, context);
+
+    const existingToken = await this.verifyPhoneNumberRepository.findOne({
+      where: {
+        user: {
+          id: user.id,
+        },
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+    if (existingToken) {
+      this.logger.warn(
+        `User ${user.id} already has a valid phone number token`,
+        context,
+      );
+      throw new AuthException(
+        AuthValidation.VERIFY_PHONE_NUMBER_TOKEN_ALREADY_EXISTS,
+      );
+    }
+
+    const token = getRandomString().slice(0, 6).toUpperCase();
+    const verifyPhoneNumberToken = new VerifyPhoneNumberToken();
+    Object.assign(verifyPhoneNumberToken, {
+      expiresAt: moment()
+        .add(60 * 10, 'seconds')
+        .toDate(),
+      token,
+      user,
+    } as VerifyPhoneNumberToken);
+
+    const result =
+      await this.transactionManagerService.execute<VerifyPhoneNumberToken>(
+        async (manager) => {
+          const zaloOaConnectorConfig = await this.getZaloOaConnectorConfig(
+            ZaloOaStrategy.VERIFY_ACCOUNT,
+          );
+
+          const backendUrl = await this.getBackendUrl();
+          const expiresTime = moment(verifyPhoneNumberToken.expiresAt).format(
+            'HH:mm DD/MM/YYYY',
+          );
+          const requestIdZns = getRandomString();
+          const requestIdSms = getRandomString();
+
+          const zaloOaInitiateSmsByMultiChannelMessageRequestDto =
+            new ZaloOaInitiateSmsByMultiChannelMessageRequestDto();
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.ApiKey =
+            this.zaloOaApiKey;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.SecretKey =
+            this.zaloOaSecretKey;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Phone =
+            user.phonenumber;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Channels = [
+            SMSChannel.ZALO,
+            SMSChannel.SMS,
+          ];
+
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Data = [
+            {
+              TempID: zaloOaConnectorConfig.templateId,
+              Params: [token, expiresTime],
+              OAID: this.zaloOaId,
+              campaignid: zaloOaConnectorConfig.strategy,
+              CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+              RequestId: requestIdZns,
+              Sandbox: '0',
+              SendingMode: '1',
+            } as ZaloDataRequestDto,
+            {
+              Content: fillVerifyAccountContent(token, expiresTime),
+              IsUnicode: '0',
+              SmsType: '2',
+              Brandname: 'TrendCoffee',
+              CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+              RequestId: requestIdSms,
+              Sandbox: '0',
+            } as SmsDataRequestDto,
+          ];
+
+          const zaloOaInitiateResponse: ZaloOaInitiateSmsResponseDto =
+            await this.zaloOaConnectorClient.initiateVerifyPhoneNumberSmsByMultiChannelMessage(
+              zaloOaInitiateSmsByMultiChannelMessageRequestDto,
+            );
+
+          if (zaloOaInitiateResponse.ErrorMessage) {
+            this.logger.error(
+              `Error when initiate sms verify account: ${zaloOaInitiateResponse.ErrorMessage}`,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.ERROR_INITIATE_SMS_VERIFY_ACCOUNT,
+            );
+          }
+          const createdToken = await manager.save(verifyPhoneNumberToken);
+          if (zaloOaInitiateResponse.SMSID) {
+            const zaloOaConnectorHistory = new ZaloOaConnectorHistory();
+            Object.assign(zaloOaConnectorHistory, {
+              tokenId: createdToken.id,
+              smsId: zaloOaInitiateResponse.SMSID,
+              requestId: `${requestIdZns}-${requestIdSms}`,
+              templateId: zaloOaConnectorConfig.templateId,
+              strategy: zaloOaConnectorConfig.strategy,
+            } as ZaloOaConnectorHistory);
+
+            await manager.save(zaloOaConnectorHistory);
+          }
+          return createdToken;
+        },
+        () => {
+          this.logger.log(
+            `User ${user.id} created initiate verify phone number token`,
+            context,
+          );
+        },
+        (error) => {
+          this.logger.error(
+            `Error when create initiate verify phone number token`,
+            error.stack,
+            context,
+          );
+          throw new AuthException(
+            AuthValidation.ERROR_CREATE_VERIFY_PHONE_NUMBER_TOKEN,
+          );
+        },
+      );
+
+    return this.mapper.map(
+      result,
+      VerifyPhoneNumberToken,
+      VerifyPhoneNumberResponseDto,
+    );
+  }
+
+  async resendVerifyPhoneNumberCode(
+    currentUserDto: CurrentUserDto,
+  ): Promise<VerifyPhoneNumberResponseDto> {
+    const context = `${AuthService.name}.${this.resendVerifyPhoneNumberCode.name}`;
+    this.logger.log(`Request resend verify phone number code}`, context);
+    const user = await this.userUtils.getUser({
+      where: {
+        id: currentUserDto.userId ?? IsNull(),
+        phonenumber: Not('default-customer'),
+      },
+    });
+
+    if (user.isVerifiedPhonenumber) {
+      this.logger.warn(
+        `User ${user.id} already verified phone number`,
+        context,
+      );
+      throw new AuthException(AuthValidation.USER_ALREADY_VERIFIED_PHONENUMBER);
+    }
+
+    const existingToken: VerifyPhoneNumberToken =
+      await this.verifyPhoneNumberRepository.findOne({
+        where: {
+          user: {
+            id: user.id,
+          },
+          expiresAt: MoreThan(new Date()),
+        },
+      });
+    if (!existingToken) {
+      this.logger.warn(`Verify phone number token is not existed`, context);
+      throw new AuthException(
+        AuthValidation.VERIFY_PHONE_NUMBER_TOKEN_NOT_FOUND,
+      );
+    }
+
+    const result =
+      await this.transactionManagerService.execute<VerifyPhoneNumberToken>(
+        async (manager) => {
+          const zaloOaConnectorConfig = await this.getZaloOaConnectorConfig(
+            ZaloOaStrategy.VERIFY_ACCOUNT,
+          );
+          const backendUrl = await this.getBackendUrl();
+          const expiresTime = moment(existingToken.expiresAt).format(
+            'HH:mm DD/MM/YYYY',
+          );
+          const requestId = getRandomString();
+
+          const zaloOaInitiateSmsByMultiChannelMessageRequestDto =
+            new ZaloOaInitiateSmsByMultiChannelMessageRequestDto();
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.ApiKey =
+            this.zaloOaApiKey;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.SecretKey =
+            this.zaloOaSecretKey;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Phone =
+            user.phonenumber;
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Channels = [
+            SMSChannel.ZALO,
+            SMSChannel.SMS,
+          ];
+
+          zaloOaInitiateSmsByMultiChannelMessageRequestDto.Data = [
+            {
+              TempID: zaloOaConnectorConfig.templateId,
+              Params: [existingToken.token, expiresTime],
+              OAID: this.zaloOaId,
+              campaignid: zaloOaConnectorConfig.strategy,
+              CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+              RequestId: getRandomString(),
+              Sandbox: '0',
+              SendingMode: '1',
+            } as ZaloDataRequestDto,
+            {
+              Content: fillVerifyAccountContent(
+                existingToken.token,
+                expiresTime,
+              ),
+              IsUnicode: '0',
+              SmsType: '2',
+              Brandname: 'TrendCoffee',
+              CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+              RequestId: getRandomString(),
+              Sandbox: '0',
+            } as SmsDataRequestDto,
+          ];
+
+          const zaloOaInitiateResponse: ZaloOaInitiateSmsResponseDto =
+            await this.zaloOaConnectorClient.initiateVerifyPhoneNumberSmsByMultiChannelMessage(
+              zaloOaInitiateSmsByMultiChannelMessageRequestDto,
+            );
+          if (zaloOaInitiateResponse.ErrorMessage) {
+            this.logger.error(
+              `Error when initiate sms verify account: ${zaloOaInitiateResponse.ErrorMessage}`,
+              context,
+            );
+            throw new ZaloOaConnectorException(
+              ZaloOaConnectorValidation.ERROR_INITIATE_SMS_VERIFY_ACCOUNT,
+            );
+          }
+          if (zaloOaInitiateResponse.SMSID) {
+            const zaloOaConnectorHistory = new ZaloOaConnectorHistory();
+            Object.assign(zaloOaConnectorHistory, {
+              tokenId: existingToken.id,
+              smsId: zaloOaInitiateResponse.SMSID,
+              requestId: requestId,
+              templateId: zaloOaConnectorConfig.templateId,
+              strategy: zaloOaConnectorConfig.strategy,
+            } as ZaloOaConnectorHistory);
+            await manager.save(zaloOaConnectorHistory);
+          }
+          const updatedToken = await manager.save(existingToken);
+          return updatedToken;
+        },
+        () => {
+          this.logger.log(
+            `User ${user.id} resend verify phone number code`,
+            context,
+          );
+        },
+        (error) => {
+          this.logger.error(
+            `Error when resend verify phone number code`,
+            error.stack,
+            context,
+          );
+          throw new AuthException(
+            AuthValidation.ERROR_CREATE_VERIFY_PHONE_NUMBER_TOKEN,
+          );
+        },
+      );
+
+    return this.mapper.map(
+      result,
+      VerifyPhoneNumberToken,
+      VerifyPhoneNumberResponseDto,
+    );
+  }
+
+  async confirmPhoneNumberVerificationCode(
+    currentUserDto: CurrentUserDto,
+    requestData: ConfirmPhoneNumberVerificationCodeRequestDto,
+  ): Promise<boolean> {
+    const context = `${AuthService.name}.${this.confirmPhoneNumberVerificationCode.name}`;
+
+    const user = await this.userUtils.getUser({
+      where: {
+        id: currentUserDto.userId ?? IsNull(),
+        phonenumber: Not('default-customer'),
+      },
+    });
+
+    if (user.isVerifiedPhonenumber) {
+      this.logger.warn(
+        `User ${user.id} already verified phone number`,
+        context,
+      );
+      throw new AuthException(AuthValidation.USER_ALREADY_VERIFIED_PHONENUMBER);
+    }
+
+    const existToken = await this.verifyPhoneNumberRepository.findOne({
+      where: {
+        token: requestData.code,
+        // expiresAt: MoreThan(new Date()),
+        user: { id: user.id },
+      },
+    });
+    if (!existToken) {
+      this.logger.warn(`Verify phone number token is not existed`, context);
+      throw new AuthException(
+        AuthValidation.VERIFY_PHONE_NUMBER_TOKEN_NOT_FOUND,
+      );
+    }
+
+    if (new Date().getTime() > existToken.expiresAt.getTime()) {
+      this.logger.warn(
+        AuthValidation.VERIFY_PHONE_NUMBER_TOKEN_IS_EXPIRED.message,
+        context,
+      );
+      throw new AuthException(
+        AuthValidation.VERIFY_PHONE_NUMBER_TOKEN_IS_EXPIRED,
+      );
+    }
+
+    user.isVerifiedPhonenumber = true;
+
+    // Set token expired after forgot password successfully
+    existToken.expiresAt = new Date(Date.now() - 120000); // Set expiry time to the past
+
+    await this.transactionManagerService.execute(
+      async (manager) => {
+        await manager.save(user);
+        await manager.save(existToken);
+      },
+      () => {
+        this.logger.log(
+          `User ${user.id} confirmed phone number verification token`,
+          context,
+        );
+      },
+      (error) => {
+        this.logger.error(
+          `Error when confirm phone number verification`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.CONFIRM_PHONE_NUMBER_VERIFICATION_ERROR,
+        );
+      },
+    );
+
+    return true;
+  }
+
+  /**
+   * Handles the avatar upload.
+   *
+   * This method removes the user's old avatar, uploads a new avatar,
+   * updates the user's avatar information in the database, and returns the updated user profile.
+   *
+   * @param {CurrentUserDto} user - The currently authenticated user's details.
+   * @param {Express.Multer.File} file - The new avatar file to be uploaded.
+   * @returns {Promise<AuthProfileResponseDto>} The updated user profile mapped to the `AuthProfileResponseDto`.
+   */
+  async uploadAvatar(
+    user: CurrentUserDto,
+    file: Express.Multer.File,
+  ): Promise<AuthProfileResponseDto> {
+    const context = `${AuthService.name}.${this.uploadAvatar.name}`;
+    const userEntity = await this.userUtils.getUser({
+      where: { id: user.userId },
+      relations: ['branch', 'role.permissions.authority.authorityGroup'],
+    });
+
+    // Delete old avatar
+    await this.fileService.removeFile(userEntity.image);
+
+    // Save new avatar
+    // const uploadedFile = await this.fileService.uploadFile(file);
+    // userEntity.image = uploadedFile.name;
+    userEntity.image = await this.fileService.uploadFile(file);
+    await this.userRepository.save(userEntity);
+    this.logger.log(`User ${user.userId} uploaded avatar`, context);
+
+    return this.mapper.map(userEntity, User, AuthProfileResponseDto);
+  }
+
+  /**
+   * Processes a password change request.
+   *
+   * This method validates the current user's password against the password provided by the client.
+   * If the passwords match, it hashes the new password, updates the user's password in the system, and returns an `AuthProfileResponseDto`
+   *
+   * @param {CurrentUserDto} user The currently authenticated user's details.
+   * @param {AuthChangePasswordRequestDto} requestData the new data to be updated
+   * @returns {Promise<AuthProfileResponseDto>}
+   */
+  async changePassword(
+    user: CurrentUserDto,
+    requestData: AuthChangePasswordRequestDto,
+  ): Promise<AuthProfileResponseDto> {
+    const context = `${AuthService.name}.${this.changePassword.name}`;
+    const userEntity = await this.userUtils.getUser({
+      where: { id: user.userId },
+    });
+
+    // Validate same old password
+    const isMatch = await bcrypt.compare(
+      requestData.oldPassword,
+      userEntity.password,
+    );
+    if (!isMatch) {
+      this.logger.warn(
+        `User ${user.userId} provided invalid old password`,
+        context,
+      );
+      throw new AuthException(
+        AuthValidation.INVALID_OLD_PASSWORD,
+        INVALID_OLD_PASSWORD,
+      );
+    }
+
+    const hashedPass = await bcrypt.hash(
+      requestData.newPassword,
+      this.saltOfRounds,
+    );
+    userEntity.password = hashedPass;
+    await this.userRepository.save(userEntity);
+    this.logger.log(`User ${user.userId} changed password`, context);
+
+    return this.mapper.map(userEntity, User, AuthProfileResponseDto);
+  }
+
+  /**
+   * Handles user profile updates.
+   *
+   * This method allows user can update their profile
+   *
+   * @param {CurrentUserDto} currentUserDto The currently authenticated user's details.
+   * @param {UpdateAuthProfileRequestDto} requestData
+   * @returns {Promise<AuthProfileResponseDto>} Updated user profile
+   * @throws {BranchException} Throw if branch is not found
+   * @throws {AuthException} Throw if user is not found
+   */
+  async updateProfile(
+    currentUserDto: CurrentUserDto,
+    requestData: UpdateAuthProfileRequestDto,
+  ): Promise<AuthProfileResponseDto> {
+    const context = `${AuthService.name}.${this.updateProfile.name}`;
+
+    const user = await this.userUtils.getUser({
+      where: { id: currentUserDto.userId },
+    });
+
+    Object.assign(user, {
+      ...requestData,
+    });
+
+    if (requestData.branch) {
+      const branch = await this.branchRepository.findOne({
+        where: { slug: requestData.branch },
+      });
+      if (!branch) {
+        this.logger.warn(`Branch ${requestData.branch} not found`, context);
+        throw new BranchException(BranchValidation.BRANCH_NOT_FOUND);
+      }
+      user.branch = branch;
+    }
+
+    if (requestData.dob) {
+      const [day, month] = requestData.dob.split('/');
+      user.dobDM = `${day}${month}`;
+    }
+    try {
+      const updatedUser = await this.userRepository.save(user);
+      this.logger.log(`User ${user.id} updated profile`, context);
+      if (requestData.dob && updatedUser.dobDM && this.isTodayBirthday(updatedUser.dobDM))
+        this.eventEmitter.emit(CampaignAction.USER_BIRTHDAY_TRIGGERED, { user: updatedUser });
+      return this.mapper.map(updatedUser, User, AuthProfileResponseDto);
+    } catch (error) {
+      this.logger.error(
+        `Error when updating user: ${error.message}`,
+        error.stack,
+        context,
+      );
+      throw new AuthException(AuthValidation.ERROR_UPDATE_USER);
+    }
+  }
+
+  /**
+   * Validate user
+   * @param {string} phonenumber
+   * @param {string} pass
+   * @returns {Promise<User|null>} User if found, null otherwise
+   */
+  async validateUser(phonenumber: string, pass: string): Promise<User | null> {
+    const context = `${AuthService.name}.${this.validateUser.name}`;
+    const user = await this.userRepository.findOne({
+      where: { phonenumber },
+      relations: {
+        role: {
+          permissions: {
+            authority: {
+              authorityGroup: true,
+            },
+          },
+        },
+        userRequirements: true,
+      },
+    });
+    if (!user) {
+      this.logger.warn(`User ${phonenumber} is not found`, `${context}`);
+      return null;
+    }
+    if (user.phonenumber === 'default-customer') {
+      this.logger.warn(`User ${phonenumber} is default customer`, context);
+      return null;
+    }
+    const isMatch = await bcrypt.compare(pass, user.password);
+    if (!isMatch) {
+      this.logger.warn(
+        `User ${phonenumber} provided invalid password`,
+        context,
+      );
+      return null;
+    }
+    return user;
+  }
+
+  /**
+   * Generate token base on Auth jwt payload
+   * @param {AuthJwtPayload} payload
+   * @returns {Promise<LoginAuthResponseDto>} Access token, refresh token, expire time, refresh expire time
+   */
+  async generateToken(payload: AuthJwtPayload): Promise<LoginAuthResponseDto> {
+    const refreshPayload: AuthJwtPayload = {
+      sub: payload.sub,
+      jti: payload.jti,
+      exp: Math.floor(Date.now() / 1000) + this.refeshableDuration,
+    };
+    return {
+      accessToken: this.jwtService.sign({
+        ...payload,
+        exp: Math.floor(Date.now() / 1000) + this.duration,
+      }),
+      expireTime: moment().add(this.duration, 'seconds').toString(),
+      refreshToken: this.jwtService.sign(refreshPayload),
+      expireTimeRefreshToken: moment()
+        .add(this.refeshableDuration, 'seconds')
+        .toString(),
+    };
+  }
+
+  /**
+   * Handles user authentication
+   *
+   * This method creates new access token for user that can access any resource in system.
+   *
+   * @param {LoginAuthRequestDto} loginAuthDto
+   * @returns {Promise<LoginAuthResponseDto>} Access token
+   * @throws {UnauthorizedException} Invalid credentials
+   */
+  async login(
+    loginAuthDto: LoginAuthRequestDto,
+  ): Promise<LoginAuthResponseDto> {
+    const user = await this.validateUser(
+      loginAuthDto.phonenumber,
+      loginAuthDto.password,
+    );
+    if (!user) {
+      throw new AuthException(AuthValidation.INVALID_CREDENTIALS);
+    }
+
+    checkActiveUser(user);
+    checkUserRequirement(user);
+
+    const payload: AuthJwtPayload = {
+      sub: user.id,
+      jti: uuidv4(),
+      scope: this.authUtils.buildScope(user),
+    };
+    this.logger.log(
+      `User ${user.phonenumber} logged in`,
+      `${AuthService.name}.${this.login.name}`,
+    );
+    return this.generateToken(payload);
+  }
+
+  async initiateRegister(
+    requestData: InitiateRegisterRequestDto,
+  ): Promise<InitiateRegisterResponseDto> {
+    const context = `${AuthService.name}.${this.initiateRegister.name}`;
+    this.logger.log(`Request initiate register for ${requestData.phonenumber}`, context);
+
+    const existingUser = await this.userRepository.findOne({
+      where: { phonenumber: requestData.phonenumber },
+    });
+    if (existingUser) {
+      throw new AuthException(AuthValidation.PHONE_NUMBER_ALREADY_EXISTS);
+    }
+
+    const existingToken = await this.registerOtpTokenRepository.findOne({
+      where: {
+        phonenumber: requestData.phonenumber,
+        isUsed: false,
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+    if (existingToken) {
+      throw new AuthException(AuthValidation.REGISTER_OTP_TOKEN_ALREADY_EXISTS);
+    }
+
+    const otp = getRandomString().slice(0, 6).toUpperCase();
+    const expiresAt = moment().add(60 * 10, 'seconds').toDate();
+
+    const registerOtpToken = new RegisterOtpToken();
+    Object.assign(registerOtpToken, {
+      phonenumber: requestData.phonenumber,
+      token: otp,
+      expiresAt,
+      lastSentAt: new Date(),
+      attemptCount: 0,
+      isUsed: false,
+    });
+
+    const result = await this.transactionManagerService.execute<RegisterOtpToken>(
+      async (manager) => {
+        const zaloOaConnectorConfig = await this.getZaloOaConnectorConfig(
+          ZaloOaStrategy.VERIFY_ACCOUNT,
+        );
+        const backendUrl = await this.getBackendUrl();
+        const expiresTime = moment(expiresAt).format('HH:mm DD/MM/YYYY');
+        const requestIdZns = getRandomString();
+        const requestIdSms = getRandomString();
+
+        const smsRequest = new ZaloOaInitiateSmsByMultiChannelMessageRequestDto();
+        smsRequest.ApiKey = this.zaloOaApiKey;
+        smsRequest.SecretKey = this.zaloOaSecretKey;
+        smsRequest.Phone = requestData.phonenumber;
+        smsRequest.Channels = [SMSChannel.ZALO, SMSChannel.SMS];
+        smsRequest.Data = [
+          {
+            TempID: zaloOaConnectorConfig.templateId,
+            Params: [otp, expiresTime],
+            OAID: this.zaloOaId,
+            campaignid: zaloOaConnectorConfig.strategy,
+            CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+            RequestId: requestIdZns,
+            Sandbox: '0',
+            SendingMode: '1',
+          } as ZaloDataRequestDto,
+          {
+            Content: fillVerifyAccountContent(otp, expiresTime),
+            IsUnicode: '0',
+            SmsType: '2',
+            Brandname: 'TrendCoffee',
+            CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+            RequestId: requestIdSms,
+            Sandbox: '0',
+          } as SmsDataRequestDto,
+        ];
+
+        const zaloResponse =
+          await this.zaloOaConnectorClient.initiateVerifyPhoneNumberSmsByMultiChannelMessage(
+            smsRequest,
+          );
+
+        if (zaloResponse.ErrorMessage) {
+          this.logger.error(
+            `Error sending registration OTP: ${zaloResponse.ErrorMessage}`,
+            context,
+          );
+          throw new ZaloOaConnectorException(
+            ZaloOaConnectorValidation.ERROR_INITIATE_SMS_VERIFY_ACCOUNT,
+          );
+        }
+
+        const createdToken = await manager.save(registerOtpToken);
+
+        if (zaloResponse.SMSID) {
+          const history = new ZaloOaConnectorHistory();
+          Object.assign(history, {
+            tokenId: createdToken.id,
+            smsId: zaloResponse.SMSID,
+            requestId: `${requestIdZns}-${requestIdSms}`,
+            templateId: zaloOaConnectorConfig.templateId,
+            strategy: zaloOaConnectorConfig.strategy,
+          });
+          await manager.save(history);
+        }
+
+        return createdToken;
+      },
+      () => {
+        this.logger.log(
+          `Registration OTP sent to ${requestData.phonenumber}`,
+          context,
+        );
+      },
+      (error) => {
+        this.logger.error(
+          `Error initiating registration OTP`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.ERROR_CREATE_VERIFY_PHONE_NUMBER_TOKEN,
+        );
+      },
+    );
+
+    return this.mapper.map(result, RegisterOtpToken, InitiateRegisterResponseDto);
+  }
+
+  async resendRegisterOtp(
+    requestData: ResendRegisterOtpRequestDto,
+  ): Promise<InitiateRegisterResponseDto> {
+    const context = `${AuthService.name}.${this.resendRegisterOtp.name}`;
+    this.logger.log(`Request resend register OTP for ${requestData.phonenumber}`, context);
+
+    const registerOtpToken = await this.registerOtpTokenRepository.findOne({
+      where: {
+        phonenumber: requestData.phonenumber,
+        isUsed: false,
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+    if (!registerOtpToken) {
+      throw new AuthException(AuthValidation.REGISTER_OTP_TOKEN_NOT_FOUND);
+    }
+
+    if (registerOtpToken.lastSentAt) {
+      const elapsedSeconds =
+        (Date.now() - registerOtpToken.lastSentAt.getTime()) / 1000;
+      if (elapsedSeconds < 120) {
+        throw new AuthException(AuthValidation.REGISTER_OTP_RESEND_TOO_SOON);
+      }
+    }
+
+    const newOtp = getRandomString().slice(0, 6).toUpperCase();
+    const newExpiresAt = moment().add(60 * 10, 'seconds').toDate();
+
+    registerOtpToken.token = newOtp;
+    registerOtpToken.expiresAt = newExpiresAt;
+    registerOtpToken.lastSentAt = new Date();
+    registerOtpToken.attemptCount = 0;
+
+    const result = await this.transactionManagerService.execute<RegisterOtpToken>(
+      async (manager) => {
+        const zaloOaConnectorConfig = await this.getZaloOaConnectorConfig(
+          ZaloOaStrategy.VERIFY_ACCOUNT,
+        );
+        const backendUrl = await this.getBackendUrl();
+        const expiresTime = moment(newExpiresAt).format('HH:mm DD/MM/YYYY');
+        const requestIdZns = getRandomString();
+        const requestIdSms = getRandomString();
+
+        const smsRequest = new ZaloOaInitiateSmsByMultiChannelMessageRequestDto();
+        smsRequest.ApiKey = this.zaloOaApiKey;
+        smsRequest.SecretKey = this.zaloOaSecretKey;
+        smsRequest.Phone = requestData.phonenumber;
+        smsRequest.Channels = [SMSChannel.ZALO, SMSChannel.SMS];
+        smsRequest.Data = [
+          {
+            TempID: zaloOaConnectorConfig.templateId,
+            Params: [newOtp, expiresTime],
+            OAID: this.zaloOaId,
+            campaignid: zaloOaConnectorConfig.strategy,
+            CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+            RequestId: requestIdZns,
+            Sandbox: '0',
+            SendingMode: '1',
+          } as ZaloDataRequestDto,
+          {
+            Content: fillVerifyAccountContent(newOtp, expiresTime),
+            IsUnicode: '0',
+            SmsType: '2',
+            Brandname: 'TrendCoffee',
+            CallbackUrl: `${backendUrl}/zalo-oa-connector/callback/status`,
+            RequestId: requestIdSms,
+            Sandbox: '0',
+          } as SmsDataRequestDto,
+        ];
+
+        const zaloResponse =
+          await this.zaloOaConnectorClient.initiateVerifyPhoneNumberSmsByMultiChannelMessage(
+            smsRequest,
+          );
+
+        if (zaloResponse.ErrorMessage) {
+          this.logger.error(
+            `Error resending registration OTP: ${zaloResponse.ErrorMessage}`,
+            context,
+          );
+          throw new ZaloOaConnectorException(
+            ZaloOaConnectorValidation.ERROR_INITIATE_SMS_VERIFY_ACCOUNT,
+          );
+        }
+
+        const updatedToken = await manager.save(registerOtpToken);
+
+        if (zaloResponse.SMSID) {
+          const history = new ZaloOaConnectorHistory();
+          Object.assign(history, {
+            tokenId: updatedToken.id,
+            smsId: zaloResponse.SMSID,
+            requestId: `${requestIdZns}-${requestIdSms}`,
+            templateId: zaloOaConnectorConfig.templateId,
+            strategy: zaloOaConnectorConfig.strategy,
+          });
+          await manager.save(history);
+        }
+
+        return updatedToken;
+      },
+      () => {
+        this.logger.log(
+          `Registration OTP resent to ${requestData.phonenumber}`,
+          context,
+        );
+      },
+      (error) => {
+        this.logger.error(
+          `Error resending registration OTP`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.ERROR_CREATE_VERIFY_PHONE_NUMBER_TOKEN,
+        );
+      },
+    );
+
+    return this.mapper.map(result, RegisterOtpToken, InitiateRegisterResponseDto);
+  }
+
+  async completeRegister(
+    requestData: CompleteRegisterRequestDto,
+  ): Promise<LoginAuthResponseDto> {
+    const context = `${AuthService.name}.${this.completeRegister.name}`;
+    this.logger.log(`Request complete register for ${requestData.phonenumber}`, context);
+
+    const registerOtpToken = await this.registerOtpTokenRepository.findOne({
+      where: {
+        phonenumber: requestData.phonenumber,
+        isUsed: false,
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+    if (!registerOtpToken) {
+      throw new AuthException(AuthValidation.REGISTER_OTP_TOKEN_NOT_FOUND);
+    }
+
+    if (new Date() > registerOtpToken.expiresAt) {
+      throw new AuthException(AuthValidation.REGISTER_OTP_TOKEN_EXPIRED);
+    }
+
+    if (registerOtpToken.token !== requestData.otp.toUpperCase()) {
+      registerOtpToken.attemptCount += 1;
+      if (registerOtpToken.attemptCount >= 5) {
+        registerOtpToken.expiresAt = new Date(Date.now() - 120000);
+        await this.registerOtpTokenRepository.save(registerOtpToken);
+        throw new AuthException(
+          AuthValidation.REGISTER_OTP_MAX_ATTEMPTS_EXCEEDED,
+        );
+      }
+      await this.registerOtpTokenRepository.save(registerOtpToken);
+      throw new AuthException(AuthValidation.REGISTER_OTP_INVALID);
+    }
+
+    const role = await this.roleRepository.findOne({
+      where: { name: RoleEnum.Customer },
+    });
+    if (!role)
+      throw new RoleException(
+        RoleValidation.ROLE_NOT_FOUND,
+        `Role ${RoleEnum.Customer} not found`,
+      );
+
+    const hashedPass = await bcrypt.hash(
+      requestData.password,
+      this.saltOfRounds,
+    );
+
+    const user = new User();
+    user.phonenumber = requestData.phonenumber;
+    user.password = hashedPass;
+    user.firstName = requestData.firstName ?? null;
+    user.lastName = requestData.lastName ?? null;
+    user.email = requestData.email ?? null;
+    user.role = role;
+    user.isVerifiedPhonenumber = true;
+
+    if (requestData.dob) {
+      user.dob = requestData.dob;
+      const [day, month] = requestData.dob.split('/');
+      user.dobDM = `${day}${month}`;
+    }
+
+    const blockedPhonenumberRequirement = new UserRequirement();
+    blockedPhonenumberRequirement.key =
+      UserRequirementKey.NEED_UPDATE_PHONE_NUMBER;
+    blockedPhonenumberRequirement.status = UserRequirementStatus.COMPLETED;
+    blockedPhonenumberRequirement.level = UserRequirementLevel.BLOCK;
+    blockedPhonenumberRequirement.scope = UserRequirementScope.INITIAL;
+
+    const blockedPasswordRequirement = new UserRequirement();
+    blockedPasswordRequirement.key = UserRequirementKey.NEED_UPDATE_PASSWORD;
+    blockedPasswordRequirement.status = UserRequirementStatus.COMPLETED;
+    blockedPasswordRequirement.level = UserRequirementLevel.BLOCK;
+    blockedPasswordRequirement.scope = UserRequirementScope.INITIAL;
+
+    user.userRequirements = [
+      blockedPhonenumberRequirement,
+      blockedPasswordRequirement,
+    ];
+
+    const createdUser = await this.transactionManagerService.execute<User>(
+      async (manager) => {
+        const savedUser = await manager.save(user);
+        registerOtpToken.isUsed = true;
+        registerOtpToken.expiresAt = new Date(Date.now() - 120000);
+        await manager.save(registerOtpToken);
+        return savedUser;
+      },
+      (result) => {
+        this.logger.log(
+          `User ${result.phonenumber} registered via OTP`,
+          context,
+        );
+      },
+      (error) => {
+        this.logger.error(
+          `Error completing registration: ${error.message}`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.ERROR_COMPLETE_REGISTER,
+          error.message,
+        );
+      },
+    );
+
+    if (createdUser) {
+      await this.sharedBalanceService.create({ userSlug: createdUser.slug });
+      this.eventEmitter.emit(CampaignAction.USER_CREATED, {
+        user: createdUser,
+      });
+      if (createdUser.dobDM && this.isTodayBirthday(createdUser.dobDM)) {
+        this.eventEmitter.emit(CampaignAction.USER_BIRTHDAY_TRIGGERED, {
+          user: createdUser,
+        });
+      }
+    }
+
+    const userWithRelations = await this.userRepository.findOne({
+      where: { id: createdUser.id },
+      relations: {
+        role: {
+          permissions: {
+            authority: {
+              authorityGroup: true,
+            },
+          },
+        },
+        userRequirements: true,
+      },
+    });
+
+    checkActiveUser(userWithRelations);
+
+    const payload: AuthJwtPayload = {
+      sub: userWithRelations.id,
+      jti: uuidv4(),
+      scope: this.authUtils.buildScope(userWithRelations),
+    };
+
+    return this.generateToken(payload);
+  }
+
+  /**
+   * Handles user registration
+   *
+   * This method creates new user if user does not exsit in systems
+   *
+   * @param {RegisterAuthRequestDto} requestData Required data
+   * @returns {Promise<RegisterAuthResponseDto>} User registered successfully
+   * @throws {AuthException} User already exists
+   */
+  async register(
+    requestData: RegisterAuthRequestDto,
+  ): Promise<RegisterAuthResponseDto> {
+    const context = `${AuthService.name}.${this.register.name}`;
+    const userExists = await this.userRepository.findOne({
+      where: {
+        phonenumber: requestData.phonenumber,
+      },
+    });
+    if (userExists) {
+      this.logger.warn(
+        `User ${requestData.phonenumber} already exists`,
+        context,
+      );
+      throw new AuthException(AuthValidation.USER_EXISTS);
+    }
+
+    const role = await this.roleRepository.findOne({
+      where: {
+        name: RoleEnum.Customer,
+      },
+    });
+    if (!role)
+      throw new RoleException(
+        RoleValidation.ROLE_NOT_FOUND,
+        `Role ${RoleEnum.Customer} not found`,
+      );
+
+    const user = this.mapper.map(requestData, RegisterAuthRequestDto, User);
+
+    this.logger.warn(`Salt of rounds: ${this.saltOfRounds}`, context);
+    const hashedPass = await bcrypt.hash(
+      requestData.password,
+      this.saltOfRounds,
+    );
+
+    Object.assign(user, { password: hashedPass, role });
+
+    const blockedPhonenumberRequirement = new UserRequirement();
+    blockedPhonenumberRequirement.key =
+      UserRequirementKey.NEED_UPDATE_PHONE_NUMBER;
+    blockedPhonenumberRequirement.status = UserRequirementStatus.COMPLETED;
+    blockedPhonenumberRequirement.level = UserRequirementLevel.BLOCK;
+    blockedPhonenumberRequirement.scope = UserRequirementScope.INITIAL;
+
+    const blockedPasswordRequirement = new UserRequirement();
+    blockedPasswordRequirement.key = UserRequirementKey.NEED_UPDATE_PASSWORD;
+    blockedPasswordRequirement.status = UserRequirementStatus.COMPLETED;
+    blockedPasswordRequirement.level = UserRequirementLevel.BLOCK;
+    blockedPasswordRequirement.scope = UserRequirementScope.INITIAL;
+
+    user.userRequirements = [
+      blockedPhonenumberRequirement,
+      blockedPasswordRequirement,
+    ];
+    if (requestData.dob) {
+      const [day, month] = requestData.dob.split('/');
+      user.dobDM = `${day}${month}`;
+    }
+    const createdUser = await this.transactionManagerService.execute<User>(
+      async (manager) => {
+        return await manager.save(user);
+      },
+      (result) => {
+        this.logger.log(`User ${result.phonenumber} registered`, context);
+      },
+      (error) => {
+        this.logger.error(
+          `Error when register user: ${error.message}`,
+          error.stack,
+          context,
+        );
+        throw new AuthException(
+          AuthValidation.ERROR_REGISTER_USER,
+          error.message,
+        );
+      },
+    );
+
+    if (createdUser)
+      await this.sharedBalanceService.create({ userSlug: createdUser.slug });
+
+    if (createdUser) {
+      this.eventEmitter.emit(CampaignAction.USER_CREATED, { user: createdUser });
+      if (createdUser.dobDM && this.isTodayBirthday(createdUser.dobDM))
+        this.eventEmitter.emit(CampaignAction.USER_BIRTHDAY_TRIGGERED, { user: createdUser });
+    }
+
+    return this.mapper.map(createdUser, User, RegisterAuthResponseDto);
+  }
+
+  /**
+   * Handle retrieve user profile
+   *
+   * This method retrieves detailed user information.
+   *
+   * @param {string} userId
+   * @returns {Promise<AuthProfileResponseDto>} User profile
+   * @throws {AuthException} Throw if user not found
+   */
+  async getProfile({
+    userId,
+  }: {
+    userId: string;
+  }): Promise<AuthProfileResponseDto> {
+    const user = await this.userUtils.getUser({
+      where: { id: userId },
+      relations: {
+        branch: {
+          addressDetail: true,
+        },
+        role: {
+          permissions: {
+            authority: {
+              authorityGroup: true,
+            },
+          },
+        },
+        userRequirements: true,
+      },
+    });
+    return this.mapper.map(user, User, AuthProfileResponseDto);
+  }
+
+  /**
+   * Handles the refresh access token
+   *
+   * This method generates new access token if access token is expired.
+   *
+   * @param {AuthRefreshRequestDto} requestData Required data
+   * @returns {Promise<LoginAuthResponseDto>}
+   */
+  async refresh(
+    requestData: AuthRefreshRequestDto,
+  ): Promise<LoginAuthResponseDto> {
+    const context = `${AuthService.name}.${this.refresh.name}`;
+    // Validate access token
+    let isExpiredAccessToken = false;
+    try {
+      this.jwtService.verify(requestData.accessToken);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (error) {
+      isExpiredAccessToken = true;
+    }
+    if (!isExpiredAccessToken) {
+      this.logger.warn(`Access token is not expired`, context);
+      throw new UnauthorizedException();
+    }
+
+    // Validate refresh token
+    let isExpiredRefreshToken = false;
+    try {
+      this.jwtService.verify(requestData.refreshToken);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (error) {
+      isExpiredRefreshToken = true;
+    }
+    if (isExpiredRefreshToken) {
+      this.logger.warn(`Refresh token is expired`, context);
+      throw new UnauthorizedException();
+    }
+
+    const payload: AuthJwtPayload = this.jwtService.decode(
+      requestData.refreshToken,
+    );
+
+    // Get user
+    const user = await this.userUtils.getUser({
+      where: {
+        id: payload.sub,
+      },
+      // relations: ['branch', 'role.permissions.authority.authorityGroup'],
+      relations: {
+        branch: true,
+        role: {
+          permissions: {
+            authority: {
+              authorityGroup: true,
+            },
+          },
+        },
+        userRequirements: true,
+      },
+    });
+    checkActiveUser(user);
+    checkUserRequirement(user);
+
+    payload.scope = this.authUtils.buildScope(user);
+
+    return this.generateToken(payload);
+  }
+
+  async deleteAccount(
+    currentUser: CurrentUserDto,
+    requestData: DeleteAccountRequestDto,
+  ): Promise<void> {
+    const context = `${AuthService.name}.${this.deleteAccount.name}`;
+    const user = await this.userUtils.getUser({
+      where: { id: currentUser.userId },
+    });
+
+    const isMatch = await bcrypt.compare(requestData.password, user.password);
+    if (!isMatch) {
+      this.logger.warn(
+        `User ${currentUser.userId} provided invalid password`,
+        context,
+      );
+      throw new AuthException(
+        AuthValidation.INVALID_OLD_PASSWORD,
+        INVALID_OLD_PASSWORD,
+      );
+    }
+
+    user.phonenumber = uuidv4().replace(/-/g, '').slice(0, 20);
+    user.firstName = null;
+    user.lastName = null;
+    user.dob = null;
+    user.email = null;
+    user.address = null;
+    user.image = null;
+    user.isActive = false;
+
+    try {
+      await this.userRepository.save(user);
+      this.logger.log(`User ${currentUser.userId} deleted account`, context);
+    } catch (error) {
+      this.logger.error(
+        `Error when deleting account: ${error.message}`,
+        error.stack,
+        context,
+      );
+      throw new AuthException(AuthValidation.ERROR_DELETE_ACCOUNT);
+    }
+  }
+}

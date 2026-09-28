@@ -1,0 +1,81 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { BranchController } from './branch.controller';
+import { BranchService } from './branch.service';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Branch } from './branch.entity';
+import { MAPPER_MODULE_PROVIDER } from 'src/app/app.constants';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { BranchUtils } from './branch.utils';
+import { mapperMockFactory } from 'src/test-utils/mapper-mock.factory';
+import { repositoryMockFactory } from 'src/test-utils/repository-mock.factory';
+import { dataSourceMockFactory } from 'src/test-utils/datasource-mock.factory';
+import { DataSource } from 'typeorm';
+import { TransactionManagerService } from 'src/db/transaction-manager.service';
+import { GoogleMapConnectorClient } from 'src/google-map/google-map-connector.client';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { SystemConfigService } from 'src/system-config/system-config.service';
+import { SystemConfig } from 'src/system-config/system-config.entity';
+import { BranchConfig } from 'src/branch-config/branch-config.entity';
+import { BranchConfigService } from 'src/branch-config/branch-config.service';
+
+describe('BranchController', () => {
+  let controller: BranchController;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [BranchController],
+      providers: [
+        BranchService,
+        BranchUtils,
+        TransactionManagerService,
+        {
+          provide: DataSource,
+          useFactory: dataSourceMockFactory,
+        },
+        {
+          provide: getRepositoryToken(Branch),
+          useFactory: repositoryMockFactory,
+        },
+        {
+          provide: MAPPER_MODULE_PROVIDER,
+          useFactory: mapperMockFactory,
+        },
+        {
+          provide: WINSTON_MODULE_NEST_PROVIDER,
+          useValue: console,
+        },
+        GoogleMapConnectorClient,
+        HttpService,
+        ConfigService,
+        {
+          provide: 'AXIOS_INSTANCE_TOKEN',
+          useValue: {
+            get: jest.fn(),
+            post: jest.fn(),
+          },
+        },
+        SystemConfigService,
+        {
+          provide: getRepositoryToken(SystemConfig),
+          useFactory: repositoryMockFactory,
+        },
+        BranchConfigService,
+        {
+          provide: getRepositoryToken(BranchConfig),
+          useFactory: repositoryMockFactory,
+        },
+      ],
+    }).compile();
+
+    controller = module.get<BranchController>(BranchController);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
+  });
+});

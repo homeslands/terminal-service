@@ -1,0 +1,381 @@
+import { AutoMap } from '@automapper/classes';
+import { ApiProperty } from '@nestjs/swagger';
+import {
+  ArrayNotEmpty,
+  IsArray,
+  IsEnum,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  ValidateNested,
+} from 'class-validator';
+import { OrderType } from './order.constants';
+import { BaseQueryDto, BaseResponseDto } from 'src/app/base.dto';
+import { BranchResponseDto } from 'src/branch/branch.dto';
+import {
+  CreateOrderItemRequestDto,
+  OrderItemResponseDto,
+} from 'src/order-item/order-item.dto';
+import { Transform, Type } from 'class-transformer';
+import { InvoiceResponseDto } from 'src/invoice/invoice.dto';
+import {
+  INVALID_ORDER_ITEMS,
+  INVALID_TABLE_SLUG,
+  ORDER_TYPE_INVALID,
+} from './order.validation';
+import { INVALID_BRANCH_SLUG } from 'src/branch/branch.validation';
+import { VoucherResponseDto } from 'src/voucher/voucher.dto';
+import { ChefOrderResponseDto } from 'src/chef-order/chef-order.dto';
+import { RoleResponseDto } from 'src/role/role.dto';
+import { PrinterJobResponseDto } from 'src/printer/printer.dto';
+import { AddressResponseDto } from 'src/google-map/dto/google-map.response.dto';
+
+export class CreateOrderRequestDto {
+  @AutoMap()
+  @ApiProperty({ description: 'The type of order', example: 'take-out' })
+  @IsNotEmpty({ message: ORDER_TYPE_INVALID })
+  @IsEnum(OrderType, { message: ORDER_TYPE_INVALID })
+  type: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The time left take out',
+    example: 0,
+    required: false,
+  })
+  @IsOptional()
+  @IsIn([0, 5, 10, 15, 30, 45, 60], {
+    message: 'timeLeftTakeOut must be one of 0 5, 10, 15, 30, 45, 60',
+  })
+  timeLeftTakeOut?: number;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The slug of table' })
+  @IsOptional()
+  table: string;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The phone number of delivery' })
+  @IsOptional()
+  deliveryPhone: string;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The place id of delivery address' })
+  @IsOptional()
+  deliveryTo: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The slug of branch',
+    example: '',
+  })
+  @IsNotEmpty({ message: INVALID_BRANCH_SLUG })
+  branch: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The slug of user that creating order',
+    example: '',
+  })
+  @IsOptional()
+  owner?: string;
+
+  @ApiProperty({
+    description: 'The array of order items',
+    example: [
+      {
+        quantity: 2,
+        variant: '',
+        note: '',
+        promotion: '',
+        order: '',
+      },
+    ],
+  })
+  @IsArray({ message: INVALID_ORDER_ITEMS })
+  @ArrayNotEmpty({ message: INVALID_ORDER_ITEMS })
+  @ValidateNested({ each: true })
+  @Type(() => CreateOrderItemRequestDto)
+  orderItems: CreateOrderItemRequestDto[];
+
+  // @AutoMap()
+  // @ApiProperty()
+  // @IsOptional()
+  // approvalBy?: string;
+
+  @AutoMap()
+  @ApiProperty()
+  @IsOptional()
+  voucher?: string;
+
+  @AutoMap()
+  @ApiProperty()
+  @IsOptional()
+  description?: string;
+}
+
+export class UpdateOrderRequestDto {
+  @AutoMap()
+  @ApiProperty({ description: 'The type of order', example: 'take-out' })
+  @IsNotEmpty({ message: ORDER_TYPE_INVALID })
+  @IsEnum(OrderType, { message: ORDER_TYPE_INVALID })
+  type: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The time left take out',
+    example: 0,
+  })
+  @IsIn([0, 5, 10, 15, 30, 45, 60], {
+    message: 'timeLeftTakeOut must be one of 0 5, 10, 15, 30, 45, 60',
+  })
+  timeLeftTakeOut: number;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The slug of table' })
+  @IsOptional({ message: INVALID_TABLE_SLUG })
+  table?: string;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The phone number of delivery' })
+  @IsOptional()
+  deliveryPhone: string;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The place id of delivery address' })
+  @IsOptional()
+  deliveryTo: string;
+
+  @AutoMap()
+  @ApiProperty({ description: 'The description of order' })
+  @IsOptional()
+  description?: string;
+}
+
+export class UpdateVoucherOrderRequestDto {
+  @AutoMap()
+  @ApiProperty({ description: 'The slug of voucher' })
+  @IsOptional()
+  voucher?: string;
+}
+
+export class UpdateOwnerOrderRequestDto {
+  @AutoMap()
+  @ApiProperty({ description: 'The slug of new owner', required: false })
+  @IsOptional()
+  owner?: string;
+}
+
+export class ChangeTableRequestDto {
+  @ApiProperty({ description: 'The slug of the new table' })
+  @IsNotEmpty({ message: INVALID_TABLE_SLUG })
+  newTable: string;
+}
+
+export class OwnerResponseDto extends BaseResponseDto {
+  @AutoMap()
+  phonenumber: string;
+
+  @AutoMap()
+  firstName: string;
+
+  @AutoMap()
+  lastName: string;
+
+  @AutoMap(() => RoleResponseDto)
+  role: RoleResponseDto;
+}
+
+export class ApprovalUserResponseDto extends OwnerResponseDto {
+  @AutoMap(() => BranchResponseDto)
+  branch: BranchResponseDto;
+}
+
+export class OrderPaymentResponseDto extends BaseResponseDto {
+  @AutoMap()
+  @ApiProperty()
+  paymentMethod: string;
+
+  @AutoMap()
+  @ApiProperty()
+  message: string;
+
+  @AutoMap()
+  @ApiProperty()
+  transactionId: string;
+
+  @AutoMap()
+  statusCode: string;
+
+  @AutoMap()
+  statusMessage: string;
+
+  @AutoMap()
+  amount: number;
+
+  @AutoMap()
+  qrCode?: string;
+}
+
+export class OrderTableResponseDto extends BaseResponseDto {
+  @AutoMap()
+  @ApiProperty()
+  name: string;
+
+  @AutoMap()
+  @ApiProperty()
+  location: string;
+
+  @AutoMap()
+  @ApiProperty()
+  status: string;
+}
+
+export class OrderResponseDto extends BaseResponseDto {
+  @AutoMap()
+  referenceNumber: number;
+
+  @AutoMap()
+  subtotal: number;
+
+  @AutoMap()
+  originalSubtotal: number;
+
+  @AutoMap()
+  loss: number;
+
+  @AutoMap()
+  status: string;
+
+  @AutoMap()
+  description: string;
+
+  @AutoMap()
+  type: string;
+
+  @AutoMap()
+  timeLeftTakeOut: number;
+
+  @AutoMap()
+  tableName: string;
+
+  @AutoMap(() => OwnerResponseDto)
+  owner: OwnerResponseDto;
+
+  @AutoMap(() => ApprovalUserResponseDto)
+  approvalBy: ApprovalUserResponseDto;
+
+  @AutoMap(() => [OrderItemResponseDto])
+  orderItems: OrderItemResponseDto[];
+
+  @AutoMap(() => OrderPaymentResponseDto)
+  payment: OrderPaymentResponseDto;
+
+  @AutoMap(() => InvoiceResponseDto)
+  invoice: InvoiceResponseDto;
+
+  @AutoMap(() => OrderTableResponseDto)
+  table: OrderTableResponseDto;
+
+  @AutoMap(() => VoucherResponseDto)
+  voucher: VoucherResponseDto;
+
+  @AutoMap(() => [ChefOrderResponseDto])
+  chefOrders: ChefOrderResponseDto[];
+
+  @AutoMap(() => [PrinterJobResponseDto])
+  printerInvoices?: PrinterJobResponseDto[];
+
+  @AutoMap()
+  accumulatedPointsToUse: number;
+
+  @AutoMap(() => AddressResponseDto)
+  deliveryTo: AddressResponseDto;
+
+  @AutoMap()
+  deliveryPhone: string;
+
+  @AutoMap()
+  deliveryDistance: number;
+
+  @AutoMap()
+  deliveryFee: number;
+
+  @AutoMap()
+  @ApiProperty()
+  totalVatValue: number;
+}
+
+export class GetOrderRequestDto extends BaseQueryDto {
+  @AutoMap()
+  @ApiProperty({
+    description: 'The slug of branch',
+    example: '',
+    required: false,
+  })
+  @IsOptional()
+  branch?: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The slug of table',
+    example: '',
+    required: false,
+  })
+  @IsOptional()
+  table?: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The slug of owner',
+    example: '',
+    required: false,
+  })
+  @IsOptional()
+  owner?: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'The slug of voucher',
+    example: '',
+    required: false,
+  })
+  @IsOptional()
+  voucher?: string;
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'Order status',
+    required: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.split(',') : [value],
+  )
+  status: string[] = [];
+
+  @AutoMap()
+  @ApiProperty({
+    description: 'Enable paging',
+    required: false,
+    type: Boolean,
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return true; // Default true
+    return value === 'true'; // Transform 'true' to `true` and others to `false`
+  })
+  hasPaging?: boolean;
+
+  @AutoMap()
+  @ApiProperty({ required: false, example: '2024-12-26' })
+  @Type(() => Date)
+  @IsOptional()
+  startDate?: Date;
+
+  @AutoMap()
+  @ApiProperty({ required: false, example: '2024-12-27' })
+  @Type(() => Date)
+  @IsOptional()
+  endDate?: Date;
+}

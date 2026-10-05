@@ -97,6 +97,15 @@ class EnvironmentVariables {
 
   @IsNotEmpty()
   FIREBASE_PRIVATE_KEY: string;
+
+  @IsNotEmpty()
+  JWT_PUBLIC_KEY: string;
+
+  @IsNotEmpty()
+  SHARED_USER_API_URL: string;
+
+  @IsNotEmpty()
+  INTERNAL_API_SECRET: string;
 }
 
 export function validate(config: Record<string, unknown>) {

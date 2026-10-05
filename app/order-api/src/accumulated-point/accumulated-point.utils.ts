@@ -13,13 +13,16 @@ export function calculateAccumulatedPoints(
   return Math.floor((orderTotal * percentage) / 100);
 }
 
+// SDT cua sentinel khach vang lai - DUNG CHUNG voi trend qua shared-user.
+export const DEFAULT_CUSTOMER_PHONENUMBER = 'default-customer';
+
 /**
  * Check if user is default customer
  * @param phoneNumber Phone number of user
  * @returns true if user is default customer
  */
 export function isDefaultCustomer(phoneNumber: string): boolean {
-  return phoneNumber === 'default-customer';
+  return phoneNumber === DEFAULT_CUSTOMER_PHONENUMBER;
 }
 
 /**

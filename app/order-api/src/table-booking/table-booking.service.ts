@@ -41,6 +41,11 @@ import { SystemConfigService } from 'src/system-config/system-config.service';
 import { SystemConfigKey } from 'src/system-config/system-config.constant';
 import { RoleEnum } from 'src/role/role.enum';
 import { User } from 'src/user/user.entity';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
 import { Workbook } from 'exceljs';
 @Injectable()
 export class TableBookingService {
@@ -57,6 +62,7 @@ export class TableBookingService {
     private readonly notificationUtils: NotificationUtils,
     private readonly mailService: MailService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   /**
@@ -80,6 +86,8 @@ export class TableBookingService {
   private async sendMailAfterTableBookingIsCreated(
     booking: TableBookingEntity,
   ) {
+    const context = `${TableBookingService.name}.${this.sendMailAfterTableBookingIsCreated.name}`;
+
     const staffs = await this.userRepository.find({
       where: {
         role: {
@@ -88,6 +96,37 @@ export class TableBookingService {
       },
     });
 
+    // `email` la field IDENTITY (architect-http.md muc 1.6) - nguon that nam
+    // ben `shared-user`. Cot `email_column` cuc bo chi con la cache, va tu
+    // giai doan 1 KHONG CON duong nao ghi vao no khi nhan vien tu sua ho so:
+    // `PATCH {terminal}/auth/profile` da bi xoa, UI goi thang
+    // `PATCH {shared-user}/auth/profile`. Doc thang cache o day nghia la mail
+    // dat ban di toi dia chi CU - hoac khong di toi ai, vi hang tao qua
+    // `POST /user` khong bao gio co `email` (CreateUserRequestDto khong khai
+    // field do). Chi con `PATCH /user/:slug` (admin sua ho nguoi khac) la
+    // ghi song doi xuong cache.
+    //
+    // ⚠️ FAIL-OPEN CO CHU DICH, khac moi cho khac dung helper nay.
+    // `batchLookupSharedUserIdentities` fail-closed (nem 503). O day khong
+    // duoc phep: ham nay la side-effect chay SAU khi don dat ban da ghi
+    // xong, de 503 noi len thi `POST /table-booking` bao loi trong khi ban
+    // ghi van ton tai - nguoi dat lai lan hai thanh hai don. Hong thi rot ve
+    // cache cuc bo + mot dong `warn`.
+    let identityById = new Map<string, SharedUserLookupResponse>();
+    try {
+      identityById = await batchLookupSharedUserIdentities(
+        staffs.map((staff) => staff.sharedUserId),
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Cannot read staff emails from shared-user, falling back to the local cache: ${error?.message}`,
+        context,
+      );
+    }
+
     const configuredEmail = await this.systemConfigService.get(
       SystemConfigKey.TABLE_BOOKING_NOTIFICATION_EMAIL,
       false,
@@ -95,9 +134,13 @@ export class TableBookingService {
 
     const toEmails = Array.from(
       new Set(
-        [...staffs.map((staff) => staff.email), configuredEmail].filter(
-          (email): email is string => !!email,
-        ),
+        [
+          ...staffs.map(
+            (staff) =>
+              identityById.get(staff.sharedUserId)?.email ?? staff.email,
+          ),
+          configuredEmail,
+        ].filter((email): email is string => !!email),
       ),
     );
 

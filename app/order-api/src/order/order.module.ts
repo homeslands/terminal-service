@@ -1,3 +1,4 @@
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order } from './order.entity';
@@ -62,6 +63,7 @@ import { NotificationLanguageService } from 'src/notification/language/notificat
 import { WorkShift } from 'src/work-shift/work-shift.entity';
 @Module({
   imports: [
+    SharedUserServiceModule,
     TypeOrmModule.forFeature([
       Order,
       Table,

@@ -1,3 +1,4 @@
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { Module } from '@nestjs/common';
 import { CardService } from './card/card.service';
 import { CardController } from './card/card.controller';
@@ -142,7 +143,7 @@ const subscribers = [CardOrderSubscriber];
 const schedulers = [GiftCardScheduler, BalanceScheduler];
 
 @Module({
-  imports: [...modules],
+  imports: [SharedUserServiceModule, ...modules],
   controllers: [...controllers],
   providers: [
     ...providers,

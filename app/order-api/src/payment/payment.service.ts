@@ -74,7 +74,8 @@ import { Voucher } from 'src/voucher/entity/voucher.entity';
 import { VoucherException } from 'src/voucher/voucher.exception';
 import { VoucherValidation } from 'src/voucher/voucher.validation';
 import { CreditCardStrategy } from './strategy/credit-card.strategy';
-import { checkActiveUser, checkUserRequirement } from 'src/auth/auth.utils';
+import { checkUserRequirement } from 'src/auth/auth.utils';
+import { UserActiveChecker } from 'src/external-services/shared-user-service/user-active.checker';
 import { MembershipCard } from 'src/membership-card/membership-card.entity';
 import { MembershipCardException } from 'src/membership-card/membership-card.exception';
 import { MembershipCardValidation } from 'src/membership-card/membership-card.validation';
@@ -138,6 +139,7 @@ export class PaymentService {
     private readonly paymentCallbackProducer: PaymentCallbackProducer,
     @InjectRepository(WorkShift)
     private readonly workShiftRepository: Repository<WorkShift>,
+    private readonly userActiveChecker: UserActiveChecker,
   ) {}
 
   /**
@@ -309,7 +311,7 @@ export class PaymentService {
       where: { slug: createPaymentDto.orderSlug },
     });
 
-    checkActiveUser(order.owner);
+    await this.userActiveChecker.assertActive(order.owner);
     checkUserRequirement(order.owner);
 
     // if order subtotal is less than 2000,
@@ -618,7 +620,7 @@ export class PaymentService {
       );
     }
 
-    checkActiveUser(order.owner);
+    await this.userActiveChecker.assertActive(order.owner);
     checkUserRequirement(order.owner);
 
     if (order.status !== OrderStatus.PENDING) {

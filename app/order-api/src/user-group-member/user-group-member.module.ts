@@ -1,3 +1,4 @@
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserGroupMemberService } from './user-group-member.service';
@@ -12,6 +13,7 @@ import { DbModule } from 'src/db/db.module';
   imports: [
     TypeOrmModule.forFeature([UserGroupMember, User, UserGroup]),
     DbModule,
+    SharedUserServiceModule,
   ],
   controllers: [UserGroupMemberController],
   providers: [UserGroupMemberService, UserGroupMemberProfile],

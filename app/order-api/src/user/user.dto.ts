@@ -61,8 +61,14 @@ export class CreateUserRequestDto {
 }
 
 export class UserScopeDto {
+  @ApiProperty()
   role: string;
+
+  @ApiProperty({ type: [String] })
   permissions: string[];
+
+  @ApiProperty({ type: () => BranchResponseDto, nullable: true })
+  branch: BranchResponseDto | null;
 }
 
 export class CurrentUserDto {
@@ -284,4 +290,37 @@ export class UserRequirementResponseDto extends BaseResponseDto {
   @AutoMap()
   @ApiProperty()
   lastUpdatedAt: string;
+}
+
+// QD16-bis - cua HEP tra NGUOI NHAN the qua, thay cho `GET /user` o man KHACH.
+export class LookupRecipientQueryRequestDto {
+  @ApiProperty({
+    description:
+      'So dien thoai NGUOI NHAN - khop tuyet doi, khong phai chuoi con',
+    example: '0912345678',
+  })
+  @IsNotEmpty({ message: INVALID_PHONENUMBER })
+  phonenumber: string;
+}
+
+// CO TINH HEP hon UserResponseDto: dung BON field. Man KHACH khong duoc thay
+// email / dob / address / role / diem / vi cua nguoi khac - do la ca ly do
+// route `lookup-recipient` ton tai. Dung mo rong DTO nay.
+//
+// ⚠️ Trung TEN voi `RecipientResponseDto` cua
+// `gift-card-modules/receipient/dto/recipient-response.dto.ts` nhung la HAI
+// DTO KHAC NHAU (ben do la nguoi nhan cua mot don the qua: name/quantity/
+// status/message/phone). Dung import lan.
+export class RecipientResponseDto {
+  @ApiProperty()
+  slug: string;
+
+  @ApiProperty()
+  phonenumber: string;
+
+  @ApiProperty({ required: false })
+  firstName?: string;
+
+  @ApiProperty({ required: false })
+  lastName?: string;
 }

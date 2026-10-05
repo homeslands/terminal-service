@@ -56,7 +56,8 @@ import { CashStrategy } from 'src/payment/strategy/cash.strategy';
 import { PaymentException } from 'src/payment/payment.exception';
 import { PaymentValidation } from 'src/payment/payment.validation';
 import { PaymentUtils } from 'src/payment/payment.utils';
-import { checkActiveUser, checkUserRequirement } from 'src/auth/auth.utils';
+import { checkUserRequirement } from 'src/auth/auth.utils';
+import { UserActiveChecker } from 'src/external-services/shared-user-service/user-active.checker';
 import { CoinPolicyException } from '../coin-policy/coin-policy.exception';
 import { CoinPolicyValidation } from '../coin-policy/coin-policy.validation';
 import { SharedCoinPolicyService } from 'src/shared/services/shared-coin-policy.service';
@@ -100,6 +101,7 @@ export class CardOrderService {
     private readonly sharedCoinPolicyService: SharedCoinPolicyService,
     private readonly sharedExportFileService: SharedExportFileService,
     private readonly notificationUtils: NotificationUtils,
+    private readonly userActiveChecker: UserActiveChecker,
   ) { }
 
   private buildExcelConfig() {
@@ -215,7 +217,7 @@ export class CardOrderService {
     if (cardOrder.status !== CardOrderStatus.PENDING)
       throw new OrderException(CardOrderValidation.CARD_ORDER_NOT_PENDING);
 
-    checkActiveUser(cardOrder.customer);
+    await this.userActiveChecker.assertActive(cardOrder.customer);
     checkUserRequirement(cardOrder.customer);
 
     switch (cardOrder.type) {
@@ -310,7 +312,7 @@ export class CardOrderService {
     if (cardOrder.status !== CardOrderStatus.PENDING)
       throw new OrderException(CardOrderValidation.CARD_ORDER_NOT_PENDING);
 
-    checkActiveUser(cardOrder.customer);
+    await this.userActiveChecker.assertActive(cardOrder.customer);
     checkUserRequirement(cardOrder.customer);
 
     switch (cardOrder.type) {
@@ -562,7 +564,7 @@ export class CardOrderService {
       );
     }
 
-    checkActiveUser(customer);
+    await this.userActiveChecker.assertActive(customer);
     checkUserRequirement(customer);
 
     const cashier = await this.userRepository.findOne({

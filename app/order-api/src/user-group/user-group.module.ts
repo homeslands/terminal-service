@@ -1,3 +1,4 @@
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserGroupService } from './user-group.service';
@@ -9,7 +10,10 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { Voucher } from 'src/voucher/entity/voucher.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserGroup, User, Voucher])],
+  imports: [
+    TypeOrmModule.forFeature([UserGroup, User, Voucher]),
+    SharedUserServiceModule,
+  ],
   controllers: [UserGroupController],
   providers: [UserGroupService, UserGroupProfile, TransactionManagerService],
   exports: [UserGroupService],

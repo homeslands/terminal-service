@@ -1,34 +1,11 @@
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  Inject,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
-import {
-  AuthChangePasswordRequestDto,
-  AuthJwtPayload,
   AuthProfileResponseDto,
-  AuthRefreshRequestDto,
-  CompleteRegisterRequestDto,
-  DeleteAccountRequestDto,
-  ForgotPasswordRequestDto,
-  InitiateRegisterRequestDto,
-  InitiateRegisterResponseDto,
-  LoginAuthRequestDto,
-  LoginAuthResponseDto,
-  RegisterAuthRequestDto,
-  RegisterAuthResponseDto,
-  ResendRegisterOtpRequestDto,
-  UpdateAuthProfileRequestDto,
   InitiateVerifyEmailRequestDto,
   ConfirmEmailVerificationCodeRequestDto,
   VerifyEmailResponseDto,
   VerifyPhoneNumberResponseDto,
   ConfirmPhoneNumberVerificationCodeRequestDto,
-  ForgotPasswordResponseDto,
-  ConfirmForgotPasswordRequestDto,
-  ConfirmForgotPasswordResponseDto,
-  ChangeForgotPasswordRequestDto,
 } from './auth.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from 'src/user/user.entity';
@@ -38,28 +15,18 @@ import { InjectMapper } from '@automapper/nestjs';
 import { Mapper } from '@automapper/core';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AuthException } from './auth.exception';
-import {
-  AuthValidation,
-  FORGOT_TOKEN_EXPIRED,
-  INVALID_OLD_PASSWORD,
-} from './auth.validation';
+import { AuthValidation } from './auth.validation';
 import moment from 'moment';
-import { v4 as uuidv4 } from 'uuid';
 import { Branch } from 'src/branch/branch.entity';
-import { BranchValidation } from 'src/branch/branch.validation';
-import { BranchException } from 'src/branch/branch.exception';
 import { FileService } from 'src/file/file.service';
 import { MailService } from 'src/mail/mail.service';
 import { CurrentUserDto } from 'src/user/user.dto';
 import { Role } from 'src/role/role.entity';
-import { RoleEnum } from 'src/role/role.enum';
 import { SystemConfigService } from 'src/system-config/system-config.service';
 import { SystemConfigKey } from 'src/system-config/system-config.constant';
-import { RoleException } from 'src/role/role.exception';
-import { RoleValidation } from 'src/role/role.validation';
 import { VerifyEmailToken } from './entity/verify-email-token.entity';
 import { TransactionManagerService } from 'src/db/transaction-manager.service';
-import { AuthUtils, checkUserRequirement } from './auth.utils';
+import { AuthUtils } from './auth.utils';
 import { UserUtils } from 'src/user/user.utils';
 import { getRandomString } from 'src/helper';
 import { VerifyPhoneNumberToken } from './entity/verify-phone-number-token.entity';
@@ -72,7 +39,6 @@ import {
   ZaloOaInitiateSmsResponseDto,
 } from 'src/zalo-oa-connector/zalo-oa-connector.dto';
 import {
-  fillResetPasswordContent,
   fillVerifyAccountContent,
   SMSChannel,
   ZaloOaStrategy,
@@ -81,17 +47,8 @@ import { ZaloOaConnectorConfig } from 'src/zalo-oa-connector/entity/zalo-oa-conn
 import { ZaloOaConnectorException } from 'src/zalo-oa-connector/zalo-oa-connector.exception';
 import { ZaloOaConnectorValidation } from 'src/zalo-oa-connector/zalo-oa-connector.validation';
 import { ZaloOaConnectorHistory } from 'src/zalo-oa-connector/entity/zalo-oa-connector-history.entity';
-import { VerificationMethod } from './auth.constants';
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
-import { UserRequirement } from 'src/user/user-requirement.entity';
-import {
-  UserRequirementKey,
-  UserRequirementLevel,
-  UserRequirementScope,
-  UserRequirementStatus,
-} from 'src/user/user.constant';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { CampaignAction } from 'src/campaign/campaign.constants';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 
 @Injectable()

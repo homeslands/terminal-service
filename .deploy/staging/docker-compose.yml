@@ -21,7 +21,7 @@ services:
         condition: on-failure
 
   terminal-api:
-    image: ghcr.io/homeslands/terminal-api:staging
+    image: ghcr.io/homeslands/terminal-service-api:staging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8088/api/${VERSION}/health"]
       interval: 5s

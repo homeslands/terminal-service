@@ -23,7 +23,7 @@ services:
   # tro tai DATABASE_HOST/DATABASE_PORT trong .deploy/dev/.env
 
   terminal-api:
-    image: ghcr.io/homeslands/terminal-api:dev
+    image: ghcr.io/homeslands/terminal-service-api:dev
     restart: unless-stopped
     healthcheck:
       test:

@@ -94,8 +94,26 @@ export class CardOrderSubscriber
       );
     }
 
-    const timeoutId = setTimeout(async () => {
-      await this.handleCancel(entity.slug);
+    // ⛔ try/catch PHAI nam BEN TRONG callback, khong duoc dua vao try/catch
+    // cua ham bao ngoai.
+    //
+    // Callback nay chay sau `delay` (mac dinh hang phut), khi ham bao ngoai da
+    // tra ve tu lau - khong con try/catch nao con hieu luc. Mot `await` nem
+    // loi o day la `unhandledRejection`, va Node **thoat ca tien trinh**. Da
+    // xay ra THAT o `trend` (progress/trend-api.md, 04/09/2026).
+    //
+    // `handleCancel` nem `CardOrderException` trong nghiep vu binh thuong
+    // (don khong con PENDING vi khach da tra tien xong) - tuc duong nay KHONG
+    // phai hiem gap. Va tu giai doan 1, no con co the nem 503 vi
+    // `assertActive` goi mang sang shared-user.
+    const timeoutId = setTimeout(() => {
+      this.handleCancel(entity.slug).catch((error) => {
+        this.logger.error(
+          `Error when cancelling card order ${entity.slug}: ${error?.message}`,
+          error?.stack,
+          context,
+        );
+      });
     }, delay);
 
     if (!job) {

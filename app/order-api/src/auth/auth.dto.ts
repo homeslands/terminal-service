@@ -368,9 +368,14 @@ export class CompleteRegisterRequestDto {
   dob?: string;
 }
 
+// Payload do `shared-user` ky, dung BA field (shared-user/.../auth.dto.ts).
+//
+// `scope?: string` da bi BO: token moi khong bao gio mang no. Giu lai la de
+// lai mot field LUON `undefined` ma ma nguon van tuong doc duoc - va do chinh
+// la co che cua lo "dang nhap duoc nhung menu trong" o phia UI. Quyen/role
+// lay qua `GET /auth/scope`, dung lai tu DB tren MOI request.
 export class AuthJwtPayload {
   sub: string;
   jti: string;
-  scope?: string;
   exp?: number;
 }

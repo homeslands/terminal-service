@@ -1,3 +1,4 @@
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { Module } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { PaymentController } from './payment.controller';
@@ -51,6 +52,7 @@ import { WorkShift } from 'src/work-shift/work-shift.entity';
 
 @Module({
   imports: [
+    SharedUserServiceModule,
     HttpModule,
     BullModule.registerQueue({
       name: QueueRegisterKey.PAYMENT_CALLBACK,

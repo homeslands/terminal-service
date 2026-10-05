@@ -1,6 +1,11 @@
+import { config as dotenvConfig } from 'dotenv';
+dotenvConfig({ path: '.env' });
+
+// terminal only holds the public key issued by shared-user — it can verify
+// JWTs but cannot sign new ones (no privateKey configured).
 export const jwtConstants = {
-  secret:
-    'DO NOT USE THIS VALUE. INSTEAD, CREATE A COMPLEX SECRET AND KEEP IT SAFE OUTSIDE OF THE SOURCE CODE.',
+  algorithm: 'RS256' as const,
+  publicKey: process.env.JWT_PUBLIC_KEY?.replace(/\\n/g, '\n'),
 };
 
 export enum AccountVerificationType {

@@ -25,7 +25,11 @@ import { User } from 'src/user/user.entity';
 import {
   attachCreatedByForArrayEntity,
   attachCreatedByForSingleEntity,
+  batchLookupSharedUserIdentities,
+  mergeSharedUserIdentityInto,
+  GENERAL_IDENTITY_FIELDS,
 } from 'src/user/user.helper';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { Voucher } from 'src/voucher/entity/voucher.entity';
 import { VoucherException } from 'src/voucher/voucher.exception';
@@ -44,6 +48,7 @@ export class UserGroupService {
     @Inject(WINSTON_MODULE_NEST_PROVIDER)
     private readonly logger: Logger,
     private readonly transactionManagerService: TransactionManagerService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   async create(
@@ -145,6 +150,27 @@ export class UserGroupService {
       this.userRepository,
     );
 
+    // Ghep identity cho `createdBy` - hang cuc bo chi con la cache, ho ten/SDT
+    // that nam ben shared-user (architect-http.md muc 1.1 quy tac 4). MOT lan
+    // goi batch cho ca trang, khong lookup theo tung dong.
+    //
+    // `trend` quen dung cho nay o luot dau va phai quay lai sua: `createdBy`
+    // cung la mot `User`, nen no cung can ghep y nhu thanh vien nhom.
+    const identityById = await batchLookupSharedUserIdentities(
+      groupsWithUser.map((group) => group.createdBy?.sharedUserId),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    groupsWithUser.forEach((group) => {
+      if (!group.createdBy) return;
+      mergeSharedUserIdentityInto(
+        group.createdBy,
+        identityById.get(group.createdBy.sharedUserId),
+        GENERAL_IDENTITY_FIELDS,
+      );
+    });
+
     const userGroupsDto = this.mapper.mapArray(
       groupsWithUser,
       UserGroup,
@@ -185,6 +211,20 @@ export class UserGroupService {
       userGroup,
       this.userRepository,
     );
+
+    if (userGroupWithUser.createdBy) {
+      const identityById = await batchLookupSharedUserIdentities(
+        [userGroupWithUser.createdBy.sharedUserId],
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
+      mergeSharedUserIdentityInto(
+        userGroupWithUser.createdBy,
+        identityById.get(userGroupWithUser.createdBy.sharedUserId),
+        GENERAL_IDENTITY_FIELDS,
+      );
+    }
 
     return this.mapper.map(userGroupWithUser, UserGroup, UserGroupResponseDto);
   }

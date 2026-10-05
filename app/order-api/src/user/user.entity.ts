@@ -34,8 +34,30 @@ export class User extends Base {
   @Column({ name: 'phonenumber_column', unique: true })
   phonenumber: string;
 
-  @Column({ name: 'password_column' })
-  password: string;
+  // Id that cua user ben shared-user (identity service) - dung de JwtStrategy
+  // map JWT payload.sub sang user cuc bo cua terminal. NOT NULL tu sau
+  // migration v4.0.0-01.
+  //
+  // ⚠️ **Khong phai hang nao cung tro dung sang mot danh tinh co that** - va
+  // day la cho KHAC HAN `trend`. `trend_db` va `shared_user_db` tach ra tu
+  // cung mot monolith nen giu nguyen khoa chinh, moi hang cu deu khop.
+  // `terminal_db` la mot NHANH KHAC cua monolith: do 28/09/2026 tren ban dump
+  // vua nap, 183 hang cuc bo / 137 hang ben shared-user, trung `id_column`
+  // dung **52**, trung `phonenumber` **57**. Nghia la ~126 hang mang gia tri
+  // backfill placeholder (`= id_column`) KHONG tra ra danh tinh nao.
+  //
+  // Nhung hang do chi dung duoc sau khi luot backfill A7-f gan lai
+  // `sharedUserId` that (tra theo `phonenumber`), hoac sau khi danh tinh cua
+  // ho duoc tao ben shared-user. Xem progress/terminal-api.md muc A7-f.
+  @AutoMap()
+  @Column({ name: 'shared_user_id_column', unique: true })
+  sharedUserId: string;
+
+  // Nullable vi user duoc tao qua duong tu cap hang cuc bo (QD19
+  // UserProvisioningService) khong con di qua flow tao user + mat khau cuc bo
+  // nua - mat khau thuoc ve shared-user. TODO: xoa cot nay o giai doan sau.
+  @Column({ name: 'password_column', nullable: true })
+  password?: string;
 
   @Column({ name: 'first_name_column', nullable: true })
   @AutoMap()

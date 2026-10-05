@@ -40,8 +40,19 @@ export class OrderScheduler {
       );
     }
 
-    const job = setTimeout(async () => {
-      await this.orderUtils.deleteOrder(orderSlug);
+    // Cung khuon voi `card-order.subscriber.ts`: try/catch PHAI nam BEN TRONG
+    // callback. Callback chay sau `delay`, khi ham bao ngoai da tra ve tu lau,
+    // nen mot `await` nem loi o day la `unhandledRejection` va Node **thoat ca
+    // tien trinh**. Da xay ra THAT o `trend`
+    // (progress/trend-api.md, 04/09/2026) tren dung khuon nay.
+    const job = setTimeout(() => {
+      this.orderUtils.deleteOrder(orderSlug).catch((error) => {
+        this.logger.error(
+          `Error when deleting order ${orderSlug}: ${error?.message}`,
+          error?.stack,
+          context,
+        );
+      });
     }, delay);
 
     this.schedulerRegistry.addTimeout(jobName, job);

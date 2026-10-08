@@ -847,6 +847,10 @@ export class AuthService {
           email: identity.email ?? dto.email,
           address: identity.address ?? dto.address,
           image: identity.image ?? dto.image,
+          // Ngon ngu cung la identity (architect-http.md muc 1.6): doi o
+          // service nay thi service kia phai thay - doc cot cuc bo la tra
+          // ban cu cua rieng service do.
+          language: identity.language ?? dto.language,
           isVerifiedEmail: identity.isVerifiedEmail ?? dto.isVerifiedEmail,
           isVerifiedPhonenumber:
             identity.isVerifiedPhonenumber ?? dto.isVerifiedPhonenumber,

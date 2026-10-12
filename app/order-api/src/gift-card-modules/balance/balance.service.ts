@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Balance } from './entities/balance.entity';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, IsNull, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindByFieldDto } from './dto/find-by-field.dto';
 import { InjectMapper } from '@automapper/nestjs';
@@ -55,6 +55,11 @@ export class BalanceService {
     const where: FindOptionsWhere<Balance> = {};
     if (payload.slug) where.slug = payload.slug;
     if (payload.userSlug) where.user = { slug: payload.userSlug };
+    // Ca hai khoa deu rong (vd GET /balance khong tham so) => `where = {}` se
+    // lay HANG DAU BANG (vi cua nguoi la). Ep `slug IS NULL` de khong khop hang
+    // nao => BALANCE_NOT_FOUND ben duoi. Chi khi CA HAI rong: mot khoa rong ma
+    // gan IsNull thi hong luot tra theo nguoi dung.
+    if (!payload.slug && !payload.userSlug) where.slug = IsNull();
 
     const balance = await this.balanceRepository.findOne({ where: where });
     if (!balance)

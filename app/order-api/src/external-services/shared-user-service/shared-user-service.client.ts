@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { signInternalRequest } from 'src/common/utils/internal-signature.util';
 import {
+  INTERNAL_BATCH_LOOKUP_MAX,
   INTERNAL_LIST_RECENT_MAX_PAGES,
   INTERNAL_LIST_RECENT_PAGE_SIZE,
   INTERNAL_SERVICE_HEADER,
@@ -251,18 +252,29 @@ export class SharedUserServiceClient {
   // danh sach user (UserService.getAllUsers), tranh goi lookup N+1 lan
   // theo tung dong. Tra mang rong neu ids rong hoac shared-user khong tra
   // duoc dong nao khop.
+  //
+  // A4 - shared-user tu choi (400) lo vuot INTERNAL_BATCH_LOOKUP_MAX, nen o
+  // day tu chia lo theo dung hang so do roi gop ket qua. Goi TUAN TU de mot
+  // trang lon khong ban nhieu lo cung luc vao shared-user. Mot lo hong thi ca
+  // lan goi hong (fail-closed nhu truoc) - khong tra nua danh sach.
   async lookupByIds(ids: string[]): Promise<SharedUserLookupResponse[]> {
     if (!ids.length) return [];
-    try {
-      return await this.post<SharedUserLookupResponse[]>(
-        'internal/users/batch-lookup',
-        {
-          ids,
-        },
-      );
-    } catch (error) {
-      this.toReadError(error);
+    const all: SharedUserLookupResponse[] = [];
+    for (let i = 0; i < ids.length; i += INTERNAL_BATCH_LOOKUP_MAX) {
+      let batch: SharedUserLookupResponse[];
+      try {
+        batch = await this.post<SharedUserLookupResponse[]>(
+          'internal/users/batch-lookup',
+          {
+            ids: ids.slice(i, i + INTERNAL_BATCH_LOOKUP_MAX),
+          },
+        );
+      } catch (error) {
+        this.toReadError(error);
+      }
+      all.push(...batch);
     }
+    return all;
   }
 
   // Duong DONG BO USER CHINH giua hai service (QD19 + QD21): luoi nhanh 10

@@ -811,12 +811,16 @@ export class UserService {
     }
   }
 
-  // Gan role cho 1 user. Nhan `slug` CUC BO (khac `trend`, ben do nhan
-  // `phonenumber` trong body) - UI lay slug thang tu danh sach no da co, nen
+  // Gan role cho 1 user. Nhan `slug` CUC BO (`trend` cung vay tu buoc 2.0,
+  // truoc do nhan `phonenumber` trong body) - UI lay slug thang tu danh sach, nen
   // khong co duong tra nguoc slug bang khop chuoi con (rui ro R6).
   //
   // KHONG ghi gi sang shared-user: role la nghiep vu RIENG cua terminal
   // (QD15), shared-user co bang role doc lap cua chinh no.
+  //
+  // QD20 - Customer la role DONG: khong nang Customer len nhan vien, va khong
+  // gan role Customer cho ai (137006). Phep kiem role dich chay TRUOC khi
+  // nhin hang cuc bo.
   async updateUserRole(slug: string, requestData: UpdateUserRoleRequestDto) {
     const context = `${UserService.name}.${this.updateUserRole.name}`;
     const role = await this.roleRepository.findOne({
@@ -825,6 +829,11 @@ export class UserService {
       },
     });
     if (!role) throw new RoleException(RoleValidation.ROLE_NOT_FOUND);
+
+    if (role.name === RoleEnum.Customer) {
+      this.logger.warn(`Can not assign ${role.name} role`, context);
+      throw new UserException(UserValidation.CANNOT_ASSIGN_CUSTOMER_ROLE);
+    }
 
     const user = await this.userRepository.findOne({
       where: { slug },
@@ -839,6 +848,24 @@ export class UserService {
       );
       throw new UserException(UserValidation.CANNOT_UPDATE_CUSTOMER_ROLE);
     }
+
+    // Tra identity TRUOC khi ghi (giong `trend`): shared-user khong tra loi
+    // thi hong truoc khi doi role - khong de role da doi ma client lai nhan
+    // 503. Fail-closed nhu getUserBySlug.
+    let identity: Awaited<ReturnType<SharedUserServiceClient['lookupById']>>;
+    try {
+      identity = await this.sharedUserServiceClient.lookupById(
+        user.sharedUserId,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to enrich user identity from shared-user: ${error?.message}`,
+        error?.stack,
+        context,
+      );
+      throw new ServiceUnavailableException();
+    }
+    if (!identity) throw new UserException(UserValidation.USER_NOT_FOUND);
 
     try {
       user.role = role;
@@ -855,20 +882,7 @@ export class UserService {
 
     const dto = this.mapper.map(user, User, UserResponseDto);
     // Ghep identity - hang cuc bo co the da cu (nguoi dung tu sua ho so thang
-    // ben shared-user). Fail-closed nhu getUserBySlug.
-    let identity: Awaited<ReturnType<SharedUserServiceClient['lookupById']>>;
-    try {
-      identity = await this.sharedUserServiceClient.lookupById(
-        user.sharedUserId,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to enrich user identity from shared-user: ${error?.message}`,
-        error?.stack,
-        context,
-      );
-      throw new ServiceUnavailableException();
-    }
+    // ben shared-user); dung lai lan lookup o tren, khong goi lan 2.
     return this.mergeSharedUserIdentity(dto, identity);
   }
 

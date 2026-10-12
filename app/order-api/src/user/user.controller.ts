@@ -186,7 +186,13 @@ export class UserController {
   @Post(':slug/role')
   @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Update user role' })
+  @ApiOperation({
+    summary: 'Update user role',
+    description:
+      'Customer is a closed role (QD20): assigning the Customer role is rejected ' +
+      '(137006 CANNOT_ASSIGN_CUSTOMER_ROLE); a Customer can not be given a staff ' +
+      'role (137002 CANNOT_UPDATE_CUSTOMER_ROLE).',
+  })
   @ApiResponseWithType({
     status: HttpStatus.OK,
     description: 'User role have been updated successfully',

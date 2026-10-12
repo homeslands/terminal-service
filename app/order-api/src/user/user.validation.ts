@@ -6,13 +6,15 @@ export const CANNOT_UPDATE_CUSTOMER_ROLE = 'CANNOT_UPDATE_CUSTOMER_ROLE';
 export const INVALID_LANGUAGE = 'INVALID_LANGUAGE';
 export const OWNER_NOT_A_CUSTOMER = 'OWNER_NOT_A_CUSTOMER';
 export const USER_OWNED_BY_ANOTHER_SERVICE = 'USER_OWNED_BY_ANOTHER_SERVICE';
+export const CANNOT_ASSIGN_CUSTOMER_ROLE = 'CANNOT_ASSIGN_CUSTOMER_ROLE';
 export type TUserErrorCodeKey =
   | typeof USER_NOT_FOUND
   | typeof CANNOT_UPDATE_CUSTOMER_ROLE
   | typeof ERROR_CREATE_USER
   | typeof INVALID_LANGUAGE
   | typeof OWNER_NOT_A_CUSTOMER
-  | typeof USER_OWNED_BY_ANOTHER_SERVICE;
+  | typeof USER_OWNED_BY_ANOTHER_SERVICE
+  | typeof CANNOT_ASSIGN_CUSTOMER_ROLE;
 export type TUserErrorCode = Record<TUserErrorCodeKey, TErrorCodeValue>;
 
 // 137000 - 138000
@@ -31,5 +33,11 @@ export const UserValidation: TUserErrorCode = {
   USER_OWNED_BY_ANOTHER_SERVICE: createErrorCode(
     137005,
     'User belongs to another service',
+  ),
+  // QD20 - Customer la role DONG: khong gan role Customer cho ai qua
+  // POST /user/:slug/role. Customer chi den tu dang ky / cap hang cuc bo.
+  CANNOT_ASSIGN_CUSTOMER_ROLE: createErrorCode(
+    137006,
+    'Can not assign customer role',
   ),
 };

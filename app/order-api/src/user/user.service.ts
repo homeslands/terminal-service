@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -66,6 +61,7 @@ import {
   SharedUserLookupResponse,
   SharedUserServiceClient,
 } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { SharedUserUnavailableException } from 'src/external-services/shared-user-service/shared-user-service.exception';
 import { UserProvisioningService } from './user-provisioning.service';
 // Dung lai helper da co thay vi viet lai literal 'default-customer' - xem
 // lookupRecipient rang buoc 4a.
@@ -232,7 +228,7 @@ export class UserService {
       (error as Error)?.stack,
       context,
     );
-    throw new ServiceUnavailableException();
+    throw new SharedUserUnavailableException();
   }
 
   private isTodayBirthday(dobDM: string): boolean {
@@ -273,7 +269,7 @@ export class UserService {
         error?.stack,
         context,
       );
-      throw new ServiceUnavailableException();
+      throw new SharedUserUnavailableException();
     }
 
     // Co hang cuc bo nhung shared-user khong co danh tinh => nguoi nay khong
@@ -863,7 +859,7 @@ export class UserService {
         error?.stack,
         context,
       );
-      throw new ServiceUnavailableException();
+      throw new SharedUserUnavailableException();
     }
     if (!identity) throw new UserException(UserValidation.USER_NOT_FOUND);
 
@@ -1260,7 +1256,7 @@ export class UserService {
         error?.stack,
         `${UserService.name}.${this.getAllUsers.name}`,
       );
-      throw new ServiceUnavailableException();
+      throw new SharedUserUnavailableException();
     }
 
     return {

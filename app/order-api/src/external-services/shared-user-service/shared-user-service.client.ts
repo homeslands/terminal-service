@@ -1,8 +1,9 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { signInternalRequest } from 'src/common/utils/internal-signature.util';
+import { SharedUserUnavailableException } from './shared-user-service.exception';
 import {
   INTERNAL_BATCH_LOOKUP_MAX,
   INTERNAL_LIST_RECENT_MAX_PAGES,
@@ -168,26 +169,41 @@ export class SharedUserServiceClient {
    *   KHONG tra loi duoc. Day khong phai "khong tim thay", va tuyet doi khong
    *   duoc de ben goi hieu nham thanh vay.
    *
-   * Vi sao chuyen thanh `ServiceUnavailableException` ngay tai day thay vi de
-   * tung noi goi tu bat: loi axios KHONG phai `HttpException`, ma
+   * Vi sao chuyen thanh `SharedUserUnavailableException` ngay tai day thay vi
+   * de tung noi goi tu bat: loi axios KHONG phai `HttpException`, ma
    * `HttpExceptionFilter` lai `@Catch(HttpException)` - nen neu de nguyen, no
    * roi xuong bo xu ly mac dinh cua Nest va ra **500 "Internal server error"**.
    * `JwtStrategy` da tu chuyen thanh 503 tu truoc, con `updateUserRole`,
    * `UserActiveChecker` va `updateUserLanguage` thi chua - cung mot nguyen
    * nhan lai ra hai ma khac nhau tuy endpoint. Gom vao day de moi ham doc
    * hanh xu giong nhau, dung sai lech **D9** da ghi giay to (503 khi
-   * shared-user khong tra loi).
+   * shared-user khong tra loi). Tu buoc 2.4: HTTP van 503, body mang ma
+   * nghiep vu **162001** `SHARED_USER_UNAVAILABLE` de UI dich duoc.
+   *
+   * Ghi log NGUYEN NHAN GOC o day (path, status, ma loi mang): exception moi
+   * khong mang loi axios theo, va nhieu noi goi khong tu bat - thieu dong nay
+   * thi `shared-user` sap ma `terminal` chi tra 503, khong de lai dau vet nao.
    *
    * KHONG ap dung cho cac ham GHI (`createUser`, `importUser`,
    * `updateIdentity`, `revertCreatedUser`): ben goi con doc `error.response.status` de phan biet
    * 400/409 (trung SDT) - boc lai se lam hong nhanh do.
    */
   private toReadError(error: unknown): never {
-    const status = (error as { response?: { status?: number } })?.response
-      ?.status;
+    const err = error as {
+      response?: { status?: number };
+      config?: { url?: string };
+      code?: string;
+      message?: string;
+    };
+    const status = err?.response?.status;
     if (status === 404) throw error;
-    throw new ServiceUnavailableException();
+    this.logger.error(
+      `shared-user read failed: url=${err?.config?.url ?? '-'} status=${status ?? '-'} code=${err?.code ?? '-'} ${err?.message ?? ''}`,
+    );
+    throw new SharedUserUnavailableException();
   }
+
+  private readonly logger = new Logger(SharedUserServiceClient.name);
 
   constructor(
     private readonly httpService: HttpService,

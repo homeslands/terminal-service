@@ -51,6 +51,7 @@ import { PrinterConnectorValidation } from 'src/printer-connector/printer-connec
 import { ZaloOaConnectorValidation } from 'src/zalo-oa-connector/zalo-oa-connector.validation';
 import { VatRequestValidation } from 'src/vat-request/vat-request.validation';
 import { WorkShiftValidation } from 'src/work-shift/work-shift.validation';
+import { SharedUserServiceValidation } from 'src/external-services/shared-user-service/shared-user-service.validation';
 
 export type TErrorCodeValue = {
   code: number;
@@ -120,6 +121,7 @@ export const AppValidation: TErrorCode = {
   ...CampaignValidation,
   ...VatRequestValidation,
   ...WorkShiftValidation,
+  ...SharedUserServiceValidation,
 };
 
 const errorCodeKeys = Object.keys(AppValidation);

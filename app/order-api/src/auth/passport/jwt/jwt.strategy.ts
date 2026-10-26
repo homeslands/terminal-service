@@ -4,7 +4,6 @@ import {
   Inject,
   Injectable,
   Logger,
-  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { jwtConstants } from '../../constants';
@@ -16,6 +15,7 @@ import { CurrentUserDto } from 'src/user/user.dto';
 import { AuthUtils } from '../../auth.utils';
 import { ClsService } from 'nestjs-cls';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { SharedUserUnavailableException } from 'src/external-services/shared-user-service/shared-user-service.exception';
 import { UserValidation } from 'src/user/user.validation';
 import { UserException } from 'src/user/user.exception';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
@@ -68,7 +68,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           error.stack,
           context,
         );
-        throw new ServiceUnavailableException();
+        throw new SharedUserUnavailableException();
       });
     // Token da verify hop le bang public key cua shared-user, nen ve ly
     // thuyet luon tra ve duoc user - null chi xay ra neu tai khoan da bi xoa

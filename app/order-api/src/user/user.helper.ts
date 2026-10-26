@@ -1,10 +1,11 @@
 import { Repository, In, IsNull } from 'typeorm';
-import { Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { User } from './user.entity';
 import {
   SharedUserLookupResponse,
   SharedUserServiceClient,
 } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { SharedUserUnavailableException } from 'src/external-services/shared-user-service/shared-user-service.exception';
 
 /**
  * Attach createdBy user to array entity
@@ -177,7 +178,7 @@ export const batchLookupSharedUserIdentities = async (
       error?.stack,
       context,
     );
-    throw new ServiceUnavailableException();
+    throw new SharedUserUnavailableException();
   }
 };
 

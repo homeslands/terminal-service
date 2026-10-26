@@ -45,6 +45,9 @@ export interface SharedUserLookupResponse {
   // shared-user chi MO TA, quyet dinh nam o day (xem
   // UserProvisioningService.isProvisionable).
   ownerService?: string | null;
+  // QD22.c - CHI co o `lookup` / `batch-lookup` (va `user` cua bulk-issue
+  // the). Ben goi tu loc khoa BLOCK dang PENDING de chan len don.
+  userRequirements?: SharedUserRequirement[];
   // Ngay dang ky that ben shared-user - nguon duy nhat de ghi vao
   // user.createdAt khi tu tao row lazy cuc bo (KHONG dung gio tao row/gio
   // job chay), xem issuses/sync-user-data-with-role.md muc 6.3.
@@ -116,6 +119,38 @@ export interface UpdateSharedUserIdentityRequest {
   address?: string;
   image?: string;
   language?: string;
+}
+
+// QD22.c - mot requirement trong `userRequirements` cua lookup user.
+export interface SharedUserRequirement {
+  slug: string;
+  key: string;
+  status: string;
+  level: string;
+  scope: string;
+  expiredAt: string | null;
+  lastUpdatedAt: string | null;
+  createdAt: string;
+}
+
+// QD22.c - hop dong the cua /internal/membership-cards/* (du field de ben goi
+// tu anh xa ra MembershipCardResponseDto dang dung - muc 1.4).
+export interface SharedMembershipCard {
+  id: string;
+  slug: string;
+  code: string;
+  userId: string | null;
+  isActive: boolean;
+  expiredAt: string | null;
+  createdAt: string;
+}
+
+// QD22.b - `user` du shape lookup de truyen thang vao `ensureLocalUsers`.
+export interface SharedMembershipCardIssued {
+  cardId: string;
+  code: string;
+  userId: string;
+  user: SharedUserLookupResponse;
 }
 
 // Client wrapper goi HTTP noi bo sang shared-user (/internal/*). Cac module
@@ -349,6 +384,120 @@ export class SharedUserServiceClient {
     return this.post<SharedUserLookupResponse>(
       `internal/users/${id}/toggle-active`,
       { isActive },
+    );
+  }
+
+  // ==========================================================================
+  // QD22 (buoc 2.4) - /internal/membership-cards/*. CHUA AI GOI: buoc 2.5 moi
+  // doi nguon the + requirement sang day. Quyen phat/khoa/thay the kiem o
+  // service nay (role cua no) truoc khi goi - ben kia khong kiem quyen nua.
+  // Lenh GHI khong qua toReadError: ben goi doc error.response.status de bao
+  // loi dung (vd trung ma the).
+  // ==========================================================================
+
+  bulkIssueMembershipCards(
+    codes: string[],
+    expiredAt?: Date | string | null,
+  ): Promise<SharedMembershipCardIssued[]> {
+    return this.post<SharedMembershipCardIssued[]>(
+      'internal/membership-cards/bulk-issue',
+      { codes, expiredAt: expiredAt ?? undefined },
+    );
+  }
+
+  assignMembershipCard(data: {
+    userId: string;
+    code: string;
+    expiredAt?: Date | string | null;
+  }): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>('internal/membership-cards', {
+      ...data,
+      expiredAt: data.expiredAt ?? undefined,
+    });
+  }
+
+  // Doc: 404 = "khong co the nay" => null. Moi loi khac => 503 (toReadError).
+  // Khoa rong (vd quet RFID ra chuoi rong) = "khong co the nao" => null ngay,
+  // khong goi: shared-user tra 400 cho khoa rong, va 400 o day se bi doc
+  // thanh 503 - sai nghia.
+  async lookupMembershipCardByCode(
+    code: string,
+  ): Promise<SharedMembershipCard | null> {
+    if (!code) return null;
+    try {
+      return await this.post<SharedMembershipCard>(
+        'internal/membership-cards/lookup',
+        { code },
+      );
+    } catch (error) {
+      if (error?.response?.status === 404) return null;
+      this.toReadError(error);
+    }
+  }
+
+  async lookupMembershipCardByUserId(
+    userId: string,
+  ): Promise<SharedMembershipCard | null> {
+    if (!userId) return null;
+    try {
+      return await this.post<SharedMembershipCard>(
+        'internal/membership-cards/lookup',
+        { userId },
+      );
+    } catch (error) {
+      if (error?.response?.status === 404) return null;
+      this.toReadError(error);
+    }
+  }
+
+  // Ghep field `membershipCard` cho ca mot trang - chia lo theo cung tran
+  // INTERNAL_BATCH_LOOKUP_MAX nhu lookupByIds. Nguoi khong co the thi vang mat.
+  async lookupMembershipCardsByUserIds(
+    userIds: string[],
+  ): Promise<SharedMembershipCard[]> {
+    if (!userIds.length) return [];
+    const all: SharedMembershipCard[] = [];
+    for (let i = 0; i < userIds.length; i += INTERNAL_BATCH_LOOKUP_MAX) {
+      let batch: SharedMembershipCard[];
+      try {
+        batch = await this.post<SharedMembershipCard[]>(
+          'internal/membership-cards/lookup',
+          { userIds: userIds.slice(i, i + INTERNAL_BATCH_LOOKUP_MAX) },
+        );
+      } catch (error) {
+        this.toReadError(error);
+      }
+      all.push(...batch);
+    }
+    return all;
+  }
+
+  // Truyen trang thai DICH, khong de ben kia tu dao.
+  setMembershipCardActive(
+    id: string,
+    isActive: boolean,
+  ): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>(
+      `internal/membership-cards/${id}/toggle-active`,
+      { isActive },
+    );
+  }
+
+  replaceMembershipCard(data: {
+    userId: string;
+    code: string;
+    expiredAt?: Date | string | null;
+  }): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>(
+      'internal/membership-cards/replace',
+      { ...data, expiredAt: data.expiredAt ?? undefined },
+    );
+  }
+
+  removeMembershipCard(id: string): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>(
+      `internal/membership-cards/${id}/remove`,
+      {},
     );
   }
 

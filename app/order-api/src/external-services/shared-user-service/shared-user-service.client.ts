@@ -1,9 +1,11 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { signInternalRequest } from 'src/common/utils/internal-signature.util';
+import { SharedUserUnavailableException } from './shared-user-service.exception';
 import {
+  INTERNAL_BATCH_LOOKUP_MAX,
   INTERNAL_LIST_RECENT_MAX_PAGES,
   INTERNAL_LIST_RECENT_PAGE_SIZE,
   INTERNAL_SERVICE_HEADER,
@@ -44,6 +46,9 @@ export interface SharedUserLookupResponse {
   // shared-user chi MO TA, quyet dinh nam o day (xem
   // UserProvisioningService.isProvisionable).
   ownerService?: string | null;
+  // QD22.c - CHI co o `lookup` / `batch-lookup` (va `user` cua bulk-issue
+  // the). Ben goi tu loc khoa BLOCK dang PENDING de chan len don.
+  userRequirements?: SharedUserRequirement[];
   // Ngay dang ky that ben shared-user - nguon duy nhat de ghi vao
   // user.createdAt khi tu tao row lazy cuc bo (KHONG dung gio tao row/gio
   // job chay), xem issuses/sync-user-data-with-role.md muc 6.3.
@@ -117,6 +122,38 @@ export interface UpdateSharedUserIdentityRequest {
   language?: string;
 }
 
+// QD22.c - mot requirement trong `userRequirements` cua lookup user.
+export interface SharedUserRequirement {
+  slug: string;
+  key: string;
+  status: string;
+  level: string;
+  scope: string;
+  expiredAt: string | null;
+  lastUpdatedAt: string | null;
+  createdAt: string;
+}
+
+// QD22.c - hop dong the cua /internal/membership-cards/* (du field de ben goi
+// tu anh xa ra MembershipCardResponseDto dang dung - muc 1.4).
+export interface SharedMembershipCard {
+  id: string;
+  slug: string;
+  code: string;
+  userId: string | null;
+  isActive: boolean;
+  expiredAt: string | null;
+  createdAt: string;
+}
+
+// QD22.b - `user` du shape lookup de truyen thang vao `ensureLocalUsers`.
+export interface SharedMembershipCardIssued {
+  cardId: string;
+  code: string;
+  userId: string;
+  user: SharedUserLookupResponse;
+}
+
 // Client wrapper goi HTTP noi bo sang shared-user (/internal/*). Cac module
 // khac khong tu dung HttpService truc tiep - luon qua wrapper nay.
 @Injectable()
@@ -132,26 +169,41 @@ export class SharedUserServiceClient {
    *   KHONG tra loi duoc. Day khong phai "khong tim thay", va tuyet doi khong
    *   duoc de ben goi hieu nham thanh vay.
    *
-   * Vi sao chuyen thanh `ServiceUnavailableException` ngay tai day thay vi de
-   * tung noi goi tu bat: loi axios KHONG phai `HttpException`, ma
+   * Vi sao chuyen thanh `SharedUserUnavailableException` ngay tai day thay vi
+   * de tung noi goi tu bat: loi axios KHONG phai `HttpException`, ma
    * `HttpExceptionFilter` lai `@Catch(HttpException)` - nen neu de nguyen, no
    * roi xuong bo xu ly mac dinh cua Nest va ra **500 "Internal server error"**.
    * `JwtStrategy` da tu chuyen thanh 503 tu truoc, con `updateUserRole`,
    * `UserActiveChecker` va `updateUserLanguage` thi chua - cung mot nguyen
    * nhan lai ra hai ma khac nhau tuy endpoint. Gom vao day de moi ham doc
    * hanh xu giong nhau, dung sai lech **D9** da ghi giay to (503 khi
-   * shared-user khong tra loi).
+   * shared-user khong tra loi). Tu buoc 2.4: HTTP van 503, body mang ma
+   * nghiep vu **162001** `SHARED_USER_UNAVAILABLE` de UI dich duoc.
+   *
+   * Ghi log NGUYEN NHAN GOC o day (path, status, ma loi mang): exception moi
+   * khong mang loi axios theo, va nhieu noi goi khong tu bat - thieu dong nay
+   * thi `shared-user` sap ma `terminal` chi tra 503, khong de lai dau vet nao.
    *
    * KHONG ap dung cho cac ham GHI (`createUser`, `importUser`,
    * `updateIdentity`, `revertCreatedUser`): ben goi con doc `error.response.status` de phan biet
    * 400/409 (trung SDT) - boc lai se lam hong nhanh do.
    */
   private toReadError(error: unknown): never {
-    const status = (error as { response?: { status?: number } })?.response
-      ?.status;
+    const err = error as {
+      response?: { status?: number };
+      config?: { url?: string };
+      code?: string;
+      message?: string;
+    };
+    const status = err?.response?.status;
     if (status === 404) throw error;
-    throw new ServiceUnavailableException();
+    this.logger.error(
+      `shared-user read failed: url=${err?.config?.url ?? '-'} status=${status ?? '-'} code=${err?.code ?? '-'} ${err?.message ?? ''}`,
+    );
+    throw new SharedUserUnavailableException();
   }
+
+  private readonly logger = new Logger(SharedUserServiceClient.name);
 
   constructor(
     private readonly httpService: HttpService,
@@ -251,18 +303,29 @@ export class SharedUserServiceClient {
   // danh sach user (UserService.getAllUsers), tranh goi lookup N+1 lan
   // theo tung dong. Tra mang rong neu ids rong hoac shared-user khong tra
   // duoc dong nao khop.
+  //
+  // A4 - shared-user tu choi (400) lo vuot INTERNAL_BATCH_LOOKUP_MAX, nen o
+  // day tu chia lo theo dung hang so do roi gop ket qua. Goi TUAN TU de mot
+  // trang lon khong ban nhieu lo cung luc vao shared-user. Mot lo hong thi ca
+  // lan goi hong (fail-closed nhu truoc) - khong tra nua danh sach.
   async lookupByIds(ids: string[]): Promise<SharedUserLookupResponse[]> {
     if (!ids.length) return [];
-    try {
-      return await this.post<SharedUserLookupResponse[]>(
-        'internal/users/batch-lookup',
-        {
-          ids,
-        },
-      );
-    } catch (error) {
-      this.toReadError(error);
+    const all: SharedUserLookupResponse[] = [];
+    for (let i = 0; i < ids.length; i += INTERNAL_BATCH_LOOKUP_MAX) {
+      let batch: SharedUserLookupResponse[];
+      try {
+        batch = await this.post<SharedUserLookupResponse[]>(
+          'internal/users/batch-lookup',
+          {
+            ids: ids.slice(i, i + INTERNAL_BATCH_LOOKUP_MAX),
+          },
+        );
+      } catch (error) {
+        this.toReadError(error);
+      }
+      all.push(...batch);
     }
+    return all;
   }
 
   // Duong DONG BO USER CHINH giua hai service (QD19 + QD21): luoi nhanh 10
@@ -337,6 +400,120 @@ export class SharedUserServiceClient {
     return this.post<SharedUserLookupResponse>(
       `internal/users/${id}/toggle-active`,
       { isActive },
+    );
+  }
+
+  // ==========================================================================
+  // QD22 (buoc 2.4) - /internal/membership-cards/*. CHUA AI GOI: buoc 2.5 moi
+  // doi nguon the + requirement sang day. Quyen phat/khoa/thay the kiem o
+  // service nay (role cua no) truoc khi goi - ben kia khong kiem quyen nua.
+  // Lenh GHI khong qua toReadError: ben goi doc error.response.status de bao
+  // loi dung (vd trung ma the).
+  // ==========================================================================
+
+  bulkIssueMembershipCards(
+    codes: string[],
+    expiredAt?: Date | string | null,
+  ): Promise<SharedMembershipCardIssued[]> {
+    return this.post<SharedMembershipCardIssued[]>(
+      'internal/membership-cards/bulk-issue',
+      { codes, expiredAt: expiredAt ?? undefined },
+    );
+  }
+
+  assignMembershipCard(data: {
+    userId: string;
+    code: string;
+    expiredAt?: Date | string | null;
+  }): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>('internal/membership-cards', {
+      ...data,
+      expiredAt: data.expiredAt ?? undefined,
+    });
+  }
+
+  // Doc: 404 = "khong co the nay" => null. Moi loi khac => 503 (toReadError).
+  // Khoa rong (vd quet RFID ra chuoi rong) = "khong co the nao" => null ngay,
+  // khong goi: shared-user tra 400 cho khoa rong, va 400 o day se bi doc
+  // thanh 503 - sai nghia.
+  async lookupMembershipCardByCode(
+    code: string,
+  ): Promise<SharedMembershipCard | null> {
+    if (!code) return null;
+    try {
+      return await this.post<SharedMembershipCard>(
+        'internal/membership-cards/lookup',
+        { code },
+      );
+    } catch (error) {
+      if (error?.response?.status === 404) return null;
+      this.toReadError(error);
+    }
+  }
+
+  async lookupMembershipCardByUserId(
+    userId: string,
+  ): Promise<SharedMembershipCard | null> {
+    if (!userId) return null;
+    try {
+      return await this.post<SharedMembershipCard>(
+        'internal/membership-cards/lookup',
+        { userId },
+      );
+    } catch (error) {
+      if (error?.response?.status === 404) return null;
+      this.toReadError(error);
+    }
+  }
+
+  // Ghep field `membershipCard` cho ca mot trang - chia lo theo cung tran
+  // INTERNAL_BATCH_LOOKUP_MAX nhu lookupByIds. Nguoi khong co the thi vang mat.
+  async lookupMembershipCardsByUserIds(
+    userIds: string[],
+  ): Promise<SharedMembershipCard[]> {
+    if (!userIds.length) return [];
+    const all: SharedMembershipCard[] = [];
+    for (let i = 0; i < userIds.length; i += INTERNAL_BATCH_LOOKUP_MAX) {
+      let batch: SharedMembershipCard[];
+      try {
+        batch = await this.post<SharedMembershipCard[]>(
+          'internal/membership-cards/lookup',
+          { userIds: userIds.slice(i, i + INTERNAL_BATCH_LOOKUP_MAX) },
+        );
+      } catch (error) {
+        this.toReadError(error);
+      }
+      all.push(...batch);
+    }
+    return all;
+  }
+
+  // Truyen trang thai DICH, khong de ben kia tu dao.
+  setMembershipCardActive(
+    id: string,
+    isActive: boolean,
+  ): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>(
+      `internal/membership-cards/${id}/toggle-active`,
+      { isActive },
+    );
+  }
+
+  replaceMembershipCard(data: {
+    userId: string;
+    code: string;
+    expiredAt?: Date | string | null;
+  }): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>(
+      'internal/membership-cards/replace',
+      { ...data, expiredAt: data.expiredAt ?? undefined },
+    );
+  }
+
+  removeMembershipCard(id: string): Promise<SharedMembershipCard> {
+    return this.post<SharedMembershipCard>(
+      `internal/membership-cards/${id}/remove`,
+      {},
     );
   }
 

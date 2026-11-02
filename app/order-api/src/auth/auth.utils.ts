@@ -13,6 +13,7 @@ import {
   UserRequirementLevel,
   UserRequirementStatus,
 } from 'src/user/user.constant';
+import { SharedUserRequirement } from 'src/external-services/shared-user-service/shared-user-service.client';
 
 @Injectable()
 export class AuthUtils {
@@ -57,9 +58,20 @@ export class AuthUtils {
 // go, khong con cho nao trong terminal doc cot do nua: day la dieu kien de
 // giai doan sau drop duoc no.
 
-export function checkUserRequirement(user: User): void {
+// QD22 (buoc 2.5): requirement nay o shared-user, khong con bang cuc bo.
+// Nhan thang mang `userRequirements` cua `/internal/users/lookup` - luot goi
+// ma `UserActiveChecker.assertActive` vua lam ngay truoc do, khong them luot
+// nao. `undefined` = khach vang lai (assertActive tra null): khong co danh
+// tinh thi khong co requirement nao chan - dung hanh vi cu, D10.
+//
+// Fail-closed khong can lam o day: `lookup` hong thi `assertActive` da nem
+// 503 truoc khi toi day.
+export function checkUserRequirement(
+  userRequirements?: SharedUserRequirement[],
+): void {
+  if (!userRequirements?.length) return;
   if (
-    user.userRequirements.find(
+    userRequirements.find(
       (requirement) =>
         requirement.key === UserRequirementKey.NEED_UPDATE_PASSWORD &&
         requirement.status === UserRequirementStatus.PENDING &&
@@ -69,7 +81,7 @@ export function checkUserRequirement(user: User): void {
     throw new AuthException(AuthValidation.NEED_UPDATE_PASSWORD);
   }
   if (
-    user.userRequirements.find(
+    userRequirements.find(
       (requirement) =>
         requirement.key === UserRequirementKey.NEED_UPDATE_PHONE_NUMBER &&
         requirement.status === UserRequirementStatus.PENDING &&

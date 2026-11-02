@@ -76,7 +76,7 @@ import { VoucherValidation } from 'src/voucher/voucher.validation';
 import { CreditCardStrategy } from './strategy/credit-card.strategy';
 import { checkUserRequirement } from 'src/auth/auth.utils';
 import { UserActiveChecker } from 'src/external-services/shared-user-service/user-active.checker';
-import { MembershipCard } from 'src/membership-card/membership-card.entity';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { MembershipCardException } from 'src/membership-card/membership-card.exception';
 import { MembershipCardValidation } from 'src/membership-card/membership-card.validation';
 import { UserException } from 'src/user/user.exception';
@@ -124,8 +124,7 @@ export class PaymentService {
     private readonly orderItemUtils: OrderItemUtils,
     @InjectRepository(Voucher)
     private readonly voucherRepository: Repository<Voucher>,
-    @InjectRepository(MembershipCard)
-    private readonly membershipCardRepository: Repository<MembershipCard>,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
     @InjectRepository(PaymentCallbackRoute)
     private readonly paymentCallbackRouteRepository: Repository<PaymentCallbackRoute>,
     @InjectRepository(PaymentCallbackForwardLog)
@@ -311,8 +310,10 @@ export class PaymentService {
       where: { slug: createPaymentDto.orderSlug },
     });
 
-    await this.userActiveChecker.assertActive(order.owner);
-    checkUserRequirement(order.owner);
+    const ownerIdentity = await this.userActiveChecker.assertActive(
+      order.owner,
+    );
+    checkUserRequirement(ownerIdentity?.userRequirements);
 
     // if order subtotal is less than 2000,
     // set loss === subtotal
@@ -519,17 +520,20 @@ export class PaymentService {
                 MembershipCardValidation.MEMBERSHIP_CARD_CODE_REQUIRED,
               );
             }
-            const membershipCard = await this.membershipCardRepository.findOne({
-              where: { code: createPaymentDto.membershipCard },
-              relations: { user: true },
-            });
+            // QD22 (buoc 2.5): the o shared-user. Quet ma o quay => tra
+            // `/internal/membership-cards/lookup` theo `code`. Khong thay =>
+            // `null` (404 ben kia); su co mang => 503 tu `toReadError`.
+            const membershipCard =
+              await this.sharedUserServiceClient.lookupMembershipCardByCode(
+                createPaymentDto.membershipCard,
+              );
             if (!membershipCard) {
               this.logger.error('Membership card not found', null, context);
               throw new MembershipCardException(
                 MembershipCardValidation.MEMBERSHIP_CARD_NOT_FOUND,
               );
             }
-            if (!membershipCard.user) {
+            if (!membershipCard.userId) {
               this.logger.error(
                 'Membership card user not found',
                 null,
@@ -543,7 +547,10 @@ export class PaymentService {
               throw new UserException(UserValidation.OWNER_NOT_A_CUSTOMER);
             }
 
-            if (membershipCard.user.id !== order.owner.id) {
+            // So `userId` cua the (= sharedUserId) voi `sharedUserId` cua chu
+            // don - KHONG so voi `order.owner.id` cuc bo nua: hai khong gian
+            // id khac nhau ke tu khi the sang shared-user.
+            if (membershipCard.userId !== order.owner.sharedUserId) {
               this.logger.error(
                 'Membership card user is not the order owner',
                 null,
@@ -620,8 +627,10 @@ export class PaymentService {
       );
     }
 
-    await this.userActiveChecker.assertActive(order.owner);
-    checkUserRequirement(order.owner);
+    const ownerIdentity = await this.userActiveChecker.assertActive(
+      order.owner,
+    );
+    checkUserRequirement(ownerIdentity?.userRequirements);
 
     if (order.status !== OrderStatus.PENDING) {
       this.logger.error('Order is not pending', null, context);

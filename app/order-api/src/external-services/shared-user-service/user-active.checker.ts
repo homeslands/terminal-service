@@ -3,7 +3,10 @@ import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
 import { User } from 'src/user/user.entity';
-import { SharedUserServiceClient } from './shared-user-service.client';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from './shared-user-service.client';
 // Dung lai dung helper da co thay vi tu viet lai literal 'default-customer'
 // - xem ghi chu "khach vang lai" trong assertActive ben duoi.
 import { isDefaultCustomer } from 'src/accumulated-point/accumulated-point.utils';
@@ -49,7 +52,13 @@ export class UserActiveChecker {
     private readonly logger: Logger,
   ) {}
 
-  async assertActive(user: User): Promise<void> {
+  /**
+   * Tra ve chinh `lookup` da goi (QD22, buoc 2.5) de ben goi dung tiep cho
+   * `checkUserRequirement` - requirement nay o shared-user, va day la luot
+   * goi duy nhat tren duong nong. `null` = khach vang lai: khong co danh tinh
+   * ben shared-user, cung khong co requirement nao de kiem.
+   */
+  async assertActive(user: User): Promise<SharedUserLookupResponse | null> {
     const context = `${UserActiveChecker.name}.${this.assertActive.name}`;
 
     if (!user) throw new AuthException(AuthValidation.USER_NOT_ACTIVE);
@@ -68,7 +77,7 @@ export class UserActiveChecker {
     // chung helper `isDefaultCustomer` de cho nay di cung mot don vi di doi
     // voi 14 cho kia, thay vi them mot literal roi roi thu 15.
     // Xem danh sach chan day du o progress/terminal-api.md, giai doan 2.
-    if (isDefaultCustomer(user.phonenumber)) return;
+    if (isDefaultCustomer(user.phonenumber)) return null;
 
     const identity = await this.sharedUserServiceClient.lookupById(
       user.sharedUserId,
@@ -89,5 +98,7 @@ export class UserActiveChecker {
     if (!identity.isActive) {
       throw new AuthException(AuthValidation.USER_NOT_ACTIVE);
     }
+
+    return identity;
   }
 }

@@ -1,5 +1,5 @@
 import { AutomapperProfile, InjectMapper } from '@automapper/nestjs';
-import { createMap, forMember, Mapper, mapWith } from '@automapper/core';
+import { createMap, Mapper } from '@automapper/core';
 import { Injectable } from '@nestjs/common';
 import { User } from './user.entity';
 import {
@@ -8,8 +8,6 @@ import {
   UserRequirementResponseDto,
   UserResponseDto,
 } from './user.dto';
-import { MembershipCard } from 'src/membership-card/membership-card.entity';
-import { MembershipCardResponseDto } from 'src/membership-card/membership-card.dto';
 import { UserRequirement } from './user-requirement.entity';
 
 @Injectable()
@@ -20,27 +18,12 @@ export class UserProfile extends AutomapperProfile {
 
   override get profile() {
     return (mapper: Mapper) => {
-      createMap(
-        mapper,
-        User,
-        UserResponseDto,
-        forMember(
-          (destination) => destination.membershipCard,
-          mapWith(
-            MembershipCardResponseDto,
-            MembershipCard,
-            (source) => source.membershipCard,
-          ),
-        ),
-        forMember(
-          (destination) => destination.userRequirements,
-          mapWith(
-            UserRequirementResponseDto,
-            UserRequirement,
-            (source) => source.userRequirements,
-          ),
-        ),
-      );
+      // QD22 (buoc 2.5) - `membershipCard` va `userRequirements` KHONG map tu
+      // entity nua (quan he da go, nguon that o shared-user). Hai field van
+      // co trong response (muc 1.4) nhung duoc gan SAU khi map, bang
+      // `toMembershipCardResponse` / `toUserRequirementResponses` tu ket qua
+      // `lookup` - xem UserService.mergeSharedUserIdentity va getAllUsers.
+      createMap(mapper, User, UserResponseDto);
       createMap(mapper, User, GeneralUserResponseDto);
       createMap(mapper, CreateUserRequestDto, User);
       createMap(mapper, UserRequirement, UserRequirementResponseDto);

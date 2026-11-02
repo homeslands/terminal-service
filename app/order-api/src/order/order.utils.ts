@@ -47,7 +47,6 @@ export class OrderUtils {
       relations: [
         'payment',
         'owner.role',
-        'owner.userRequirements',
         'approvalBy',
         'orderItems.chefOrderItems',
         'orderItems.variant.size',

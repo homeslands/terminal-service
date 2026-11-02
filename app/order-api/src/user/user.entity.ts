@@ -24,8 +24,6 @@ import { FirebaseDeviceToken } from 'src/notification/firebase/firebase-device-t
 import { UserLanguage } from './user.constant';
 import { Voucher } from 'src/voucher/entity/voucher.entity';
 import { Balance } from 'src/gift-card-modules/balance/entities/balance.entity';
-import { MembershipCard } from 'src/membership-card/membership-card.entity';
-import { UserRequirement } from './user-requirement.entity';
 import { CampaignRecipient } from 'src/campaign/entity/campaign-recipient.entity';
 
 @Entity('user_tbl')
@@ -185,16 +183,15 @@ export class User extends Base {
   @OneToOne(() => Balance, (b) => b.user)
   balance: Balance;
 
-  @OneToOne(() => MembershipCard, (m) => m.user, {
-    cascade: ['insert', 'update', 'remove'],
-  })
-  membershipCard: MembershipCard;
-
-  @OneToMany(() => UserRequirement, (ur) => ur.user, {
-    cascade: ['insert', 'update', 'remove'],
-  })
-  @AutoMap(() => UserRequirement)
-  userRequirements: UserRequirement[];
+  // QD22 (buoc 2.5) - quan he `membershipCard` va `userRequirements` DA GO:
+  // the va requirement nay o shared-user, doc qua
+  // `/internal/membership-cards/lookup` va `userRequirements` cua
+  // `/internal/users/lookup`. Hai bang cuc bo khong con duoc ghi; doi ten o
+  // buoc 8.9, drop o 10.3 - nen entity cua chung VAN O LAI (bang that con
+  // ton tai, `synchronize: false` nen khong co rui ro schema).
+  //
+  // Dung them lai quan he nao o day de "tien tay join": lam vay la mo lai
+  // dung nguon ghi lac ma QD22 vua dong.
 
   @OneToMany(() => CampaignRecipient, (cr) => cr.user)
   campaignRecipients?: CampaignRecipient[];

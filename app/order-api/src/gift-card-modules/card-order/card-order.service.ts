@@ -205,9 +205,7 @@ export class CardOrderService {
       where: { slug: payload.cardorderSlug ?? IsNull() },
       relations: {
         payment: true,
-        customer: {
-          userRequirements: true,
-        },
+        customer: true,
         receipients: true,
       },
     });
@@ -217,8 +215,10 @@ export class CardOrderService {
     if (cardOrder.status !== CardOrderStatus.PENDING)
       throw new OrderException(CardOrderValidation.CARD_ORDER_NOT_PENDING);
 
-    await this.userActiveChecker.assertActive(cardOrder.customer);
-    checkUserRequirement(cardOrder.customer);
+    const customerIdentity = await this.userActiveChecker.assertActive(
+      cardOrder.customer,
+    );
+    checkUserRequirement(customerIdentity?.userRequirements);
 
     switch (cardOrder.type) {
       case CardOrderType.GIFT:
@@ -300,9 +300,7 @@ export class CardOrderService {
       where: { slug: payload.cardorderSlug ?? IsNull() },
       relations: {
         payment: true,
-        customer: {
-          userRequirements: true,
-        },
+        customer: true,
         receipients: true,
       },
     });
@@ -312,8 +310,10 @@ export class CardOrderService {
     if (cardOrder.status !== CardOrderStatus.PENDING)
       throw new OrderException(CardOrderValidation.CARD_ORDER_NOT_PENDING);
 
-    await this.userActiveChecker.assertActive(cardOrder.customer);
-    checkUserRequirement(cardOrder.customer);
+    const customerIdentity = await this.userActiveChecker.assertActive(
+      cardOrder.customer,
+    );
+    checkUserRequirement(customerIdentity?.userRequirements);
 
     switch (cardOrder.type) {
       case CardOrderType.GIFT:
@@ -553,9 +553,6 @@ export class CardOrderService {
       where: {
         slug: createCardOrderDto.customerSlug || IsNull(),
       },
-      relations: {
-        userRequirements: true,
-      },
     });
 
     if (!customer) {
@@ -564,8 +561,9 @@ export class CardOrderService {
       );
     }
 
-    await this.userActiveChecker.assertActive(customer);
-    checkUserRequirement(customer);
+    const customerIdentity =
+      await this.userActiveChecker.assertActive(customer);
+    checkUserRequirement(customerIdentity?.userRequirements);
 
     const cashier = await this.userRepository.findOne({
       where: {

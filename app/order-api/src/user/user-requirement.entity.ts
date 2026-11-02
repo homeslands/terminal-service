@@ -39,7 +39,9 @@ export class UserRequirement extends Base {
   lastUpdatedAt?: Date;
 
   @AutoMap(() => User)
-  @ManyToOne(() => User, (user) => user.userRequirements)
+  // Mot chieu tu buoc 2.5: `User.userRequirements` da go (QD22). Bang nay
+  // con ton tai (doi ten o 8.9, drop o 10.3) nen entity giu nguyen.
+  @ManyToOne(() => User)
   @JoinColumn({ name: 'user_column' })
   user: User;
 }

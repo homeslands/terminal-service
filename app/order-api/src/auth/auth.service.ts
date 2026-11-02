@@ -50,6 +50,7 @@ import { ZaloOaConnectorHistory } from 'src/zalo-oa-connector/entity/zalo-oa-con
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { toUserRequirementResponses } from 'src/external-services/shared-user-service/shared-user-shape.mapper';
 
 @Injectable()
 export class AuthService {
@@ -830,10 +831,13 @@ export class AuthService {
             },
           },
         },
-        userRequirements: true,
       },
     });
     const dto = this.mapper.map(user, User, AuthProfileResponseDto);
+    // QD22 (buoc 2.5): requirement nay o shared-user. Field van co trong
+    // response (muc 1.4), nhung gia tri lay tu `lookup` ngay duoi. Dat `[]`
+    // truoc khi goi de nhanh fail-open khong tra ve `undefined`.
+    dto.userRequirements = [];
     try {
       const identity = await this.sharedUserServiceClient.lookupById(
         user.sharedUserId,
@@ -854,9 +858,16 @@ export class AuthService {
           isVerifiedEmail: identity.isVerifiedEmail ?? dto.isVerifiedEmail,
           isVerifiedPhonenumber:
             identity.isVerifiedPhonenumber ?? dto.isVerifiedPhonenumber,
+          userRequirements: toUserRequirementResponses(
+            identity.userRequirements,
+          ),
         });
       }
     } catch (error) {
+      // Fail-open co san cua profile: giu nguyen chinh sach (day la enrichment
+      // hien thi). Hau qua moi tu 2.5: `userRequirements` ve `[]` thay vi ban
+      // cuc bo. Chap nhan duoc vi phep CHAN that nam o duong len don/thanh
+      // toan va cho do fail-closed (`assertActive` nem 503).
       this.logger.warn(
         `Failed to enrich profile identity from shared-user, falling back to local cache: ${error?.message}`,
         context,

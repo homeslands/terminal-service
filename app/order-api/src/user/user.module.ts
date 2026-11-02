@@ -10,7 +10,6 @@ import { UserScheduler } from './user.scheduler';
 import { Role } from 'src/role/role.entity';
 import { Branch } from 'src/branch/branch.entity';
 import { UserUtils } from './user.utils';
-import { UserRequirement } from './user-requirement.entity';
 import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { UserProvisioningModule } from './user-provisioning.module';
@@ -18,7 +17,7 @@ import { QueueRegisterKey } from 'src/app/app.constants';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Role, Branch, UserRequirement]),
+    TypeOrmModule.forFeature([User, Role, Branch]),
     MailModule,
     SharedUserServiceModule,
     // QD19 - ca bon lop dung CHUNG mot `ensureLocalUser`.

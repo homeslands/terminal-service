@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, IsNull, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { TransactionManagerService } from 'src/db/transaction-manager.service';
@@ -110,6 +110,11 @@ export class SharedBalanceService {
     const where: FindOptionsWhere<Balance> = {};
     if (payload.slug) where.slug = payload.slug;
     if (payload.userSlug) where.user = { slug: payload.userSlug };
+    // Ca hai khoa deu rong => `where = {}` se lay HANG DAU BANG (vi cua nguoi
+    // la). Ep `slug IS NULL` de khong khop hang nao => BALANCE_NOT_FOUND ben
+    // duoi. Chi khi CA HAI rong: mot khoa rong ma gan IsNull thi hong luot tra
+    // theo nguoi dung.
+    if (!payload.slug && !payload.userSlug) where.slug = IsNull();
 
     const balance = await this.balanceRepository.findOne({ where: where });
     if (!balance)

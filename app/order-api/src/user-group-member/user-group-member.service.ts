@@ -36,6 +36,7 @@ import {
   GENERAL_IDENTITY_FIELDS,
 } from 'src/user/user.helper';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { toMembershipCardResponse } from 'src/external-services/shared-user-service/shared-user-shape.mapper';
 
 @Injectable()
 export class UserGroupMemberService {
@@ -201,7 +202,9 @@ export class UserGroupMemberService {
     // Construct find many options
     const findManyOptions: FindManyOptions = {
       where: whereOptions,
-      relations: { user: { membershipCard: true }, userGroup: true },
+      // QD22 (buoc 2.5): the o shared-user, khong JOIN bang cuc bo nua -
+      // ghep vao sau khi map, bang mot luot batch `lookup` (ben duoi).
+      relations: { user: true, userGroup: true },
       order: { createdAt: 'DESC' },
       skip: (query.page - 1) * query.size,
       take: query.size,
@@ -272,14 +275,40 @@ export class UserGroupMemberService {
       }
     });
 
+    const items = this.mapper.mapArray(
+      userGroupMembersWithUser,
+      UserGroupMember,
+      UserGroupMemberResponseDto,
+    );
+
+    // QD22 (buoc 2.5) - field `user.membershipCard` cua ca trang: MOT luot
+    // batch, khong goi theo tung dong (muc 1.1 quy tac 4). Giao dien doc
+    // `userGroupMember.user.membershipCard.isActive` o cot "the thanh vien",
+    // nen field nay phai con (muc 1.4).
+    //
+    // Fail-closed nhu phan identity ngay tren: goi hong thi 503, khong tra
+    // 200 kem cot the trong.
+    const cards =
+      await this.sharedUserServiceClient.lookupMembershipCardsByUserIds(
+        userGroupMembersWithUser
+          .map((member) => member.user?.sharedUserId)
+          .filter(Boolean),
+      );
+    const cardByUserId = new Map(cards.map((card) => [card.userId, card]));
+    items.forEach((dto, index) => {
+      const sharedUserId =
+        userGroupMembersWithUser[index].user?.sharedUserId ?? null;
+      if (dto.user) {
+        dto.user.membershipCard = toMembershipCardResponse(
+          sharedUserId ? cardByUserId.get(sharedUserId) : null,
+        );
+      }
+    });
+
     return {
       hasNext: hasNext,
       hasPrevios: hasPrevious,
-      items: this.mapper.mapArray(
-        userGroupMembersWithUser,
-        UserGroupMember,
-        UserGroupMemberResponseDto,
-      ),
+      items,
       total,
       page,
       pageSize,

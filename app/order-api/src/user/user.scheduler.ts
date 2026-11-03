@@ -12,8 +12,8 @@ import Redlock from 'redlock';
 import { DistributeLockJobKey, QueueRegisterKey } from 'src/app/app.constants';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { UserProvisioningService } from './user-provisioning.service';
-import { DEFAULT_CUSTOMER_PHONENUMBER } from 'src/accumulated-point/accumulated-point.utils';
 import {
+  DEFAULT_CUSTOMER_PHONENUMBER,
   SYNC_USERS_FAST_GRID_WINDOW_MINUTES,
   SYNC_USERS_WIDE_GRID_WINDOW_HOURS,
 } from './user.constant';

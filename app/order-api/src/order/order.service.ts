@@ -86,6 +86,10 @@ import { ChefOrderUtils } from 'src/chef-order/chef-order.utils';
 import { InvoiceService } from 'src/invoice/invoice.service';
 import { WorkShift } from 'src/work-shift/work-shift.entity';
 import { WorkShiftStatus } from 'src/work-shift/work-shift.constants';
+import {
+  DEFAULT_CUSTOMER_SHARED_ID,
+  isDefaultCustomer,
+} from 'src/user/user.constant';
 @Injectable()
 export class OrderService {
   constructor(
@@ -332,7 +336,7 @@ export class OrderService {
     }
 
     // check permission
-    if (order.owner?.phonenumber === 'default-customer') {
+    if (isDefaultCustomer(order.owner)) {
       // public user
       if (requestUserRole === RoleEnum.Customer) {
         this.logger.warn(`Not permission to update order`, context);
@@ -727,11 +731,12 @@ export class OrderService {
       throw new OrderException(OrderValidation.ORDER_IS_NOT_PENDING);
     }
 
+    // Hang sentinel la MOT hang xac dinh theo id, nen dieu kien `role` cu
+    // khong con viec gi o day: no chi la cach doan ra hang do khi khoa tra la
+    // `phonenumber`. Giu lai thi them mot join va mot cach that bai (sentinel
+    // bi doi role => `USER_NOT_FOUND` tren duong doi chu don).
     const defaultCustomer = await this.userUtils.getUser({
-      where: {
-        phonenumber: 'default-customer',
-        role: { name: RoleEnum.Customer },
-      },
+      where: { sharedUserId: DEFAULT_CUSTOMER_SHARED_ID },
     });
 
     let owner = await this.userRepository.findOne({
@@ -1484,13 +1489,9 @@ export class OrderService {
       deliveryFee = deliveryDistance * deliveryFeePerKm;
     }
 
+    // Nhu tren: tra theo id cua hang sentinel, bo dieu kien `role`.
     const defaultCustomer = await this.userUtils.getUser({
-      where: {
-        phonenumber: 'default-customer',
-        role: {
-          name: RoleEnum.Customer,
-        },
-      },
+      where: { sharedUserId: DEFAULT_CUSTOMER_SHARED_ID },
     });
 
     // Get owner

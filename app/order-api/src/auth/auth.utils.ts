@@ -9,6 +9,7 @@ import { RoleEnum } from 'src/role/role.enum';
 import { Branch } from 'src/branch/branch.entity';
 import { BranchResponseDto } from 'src/branch/branch.dto';
 import {
+  isDefaultCustomer,
   UserRequirementKey,
   UserRequirementLevel,
   UserRequirementStatus,
@@ -93,10 +94,7 @@ export function checkUserRequirement(
 }
 
 export function isDefinedCustomer(user: User): boolean {
-  if (
-    user.role?.name === RoleEnum.Customer &&
-    user.phonenumber !== 'default-customer'
-  )
+  if (user.role?.name === RoleEnum.Customer && !isDefaultCustomer(user))
     return true;
 
   return false;

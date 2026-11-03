@@ -1,3 +1,14 @@
+import { config as dotenvConfig } from 'dotenv';
+
+// Nap `.env` NGAY TAI DAY, khong trong cho `config/database.config.ts`: tep
+// hang so nay duoc evaluate rat som trong do thi import va co the chay TRUOC
+// tep do. Doc `process.env` khi dotenv chua chay thi bien bi bo qua LANG LE -
+// nhin tuong da cau hinh ma that ra dang dung gia tri mac dinh.
+//
+// Goi lai dotenv la an toan: no KHONG ghi de bien da co san, nen bien that cua
+// moi truong (Docker/K8s/CI) van thang gia tri trong `.env`.
+dotenvConfig({ path: '.env' });
+
 export enum UserLanguage {
   VI = 'vi',
   EN = 'en',
@@ -76,3 +87,70 @@ export const SYNC_USERS_FAST_GRID_WINDOW_MINUTES = 30;
 // ("ca ngay hom qua") khong bao gom nguoi tao trong chinh ngay hom nay, nen
 // tre thuc te la 2,5 gio -> 26 gio.
 export const SYNC_USERS_WIDE_GRID_WINDOW_HOURS = 48;
+
+// ===========================================================================
+// 2B2 - nhan dien khach vang lai (buoc 2.6)
+// ===========================================================================
+
+// Hang sentinel `default-customer` DUNG CHUNG giua terminal, trend va
+// shared-user: `shared_user_db` giu dung mot hang, con moi DB cuc bo mot hang
+// tro vao no. Gia tri nay dung cho ca terminal vi hang sentinel cuc bo mang
+// cung `id_column` (`v4.0.0-01` gan `shared_user_id_column = id_column`).
+//
+// Doc tu bien moi truong, co MAC DINH la gia tri cua cum hien tai (ba DB local
+// deu mang dung id nay - do lai 02/11/2026).
+//
+// Ban va 02/11/2026 - vi sao doi so voi ghi chu cu "CO Y khong dua vao .env":
+// ghi chu cu so env lech giua hai service thi mot ben coi hang do la khach vang
+// lai, ben kia coi la nguoi that. Dieu do dung, NHUNG hang so hard-code cung co
+// y het failure mode ay, chi khac dieu kien: hang so doi DU LIEU phai khop MA,
+// env doi ENV phai khop DU LIEU. Ca hai deu hong lang le.
+//
+// Khac biet that: sentinel duoc tao boi `initDefaultCustomer` bang UUID NGAU
+// NHIEN (khong migration nao seed no), nen mot moi truong khong di len tu ban
+// mono se mang id khac. Sua bang env la mot dong cau hinh; sua bang cach ep id
+// o `shared-user` la doi KHOA CHINH cua mot hang co 18 khoa ngoai tro vao.
+//
+// BA service phai khai CUNG mot gia tri - xem ghi chu o buoc 2.6 cua ke hoach.
+//
+// `|| mac dinh` chu khong `??`: bien khai rong (`DEFAULT_CUSTOMER_SHARED_ID=`)
+// phai roi ve mac dinh, khong duoc thanh chuoi rong.
+export const DEFAULT_CUSTOMER_SHARED_ID =
+  process.env.DEFAULT_CUSTOMER_SHARED_ID?.trim() ||
+  '3c85fc13-2887-45c1-bd4e-4fece5387d9f';
+
+// Chi con hai cho dung SDT cua sentinel: `user.scheduler.ts`
+// (`initDefaultCustomer`, xoa o buoc 2.9) va `scripts/backfill-shared-user-ids.ts`
+// (doi chieu hai DB theo SDT - script chay truoc khi co `sharedUserId`, nen no
+// khong the doc theo khoa moi). Hang nam o day thay vi o
+// `accumulated-point/` vi thu muc do bi xoa o giai doan 8, con script thi phai
+// con chay duoc o moi truong khac.
+export const DEFAULT_CUSTOMER_PHONENUMBER = 'default-customer';
+
+/**
+ * Khach vang lai hay khong - doc theo `sharedUserId`, khong theo `phonenumber`.
+ *
+ * Vi sao nhan BAN GHI chu khong nhan mot chuoi: `phonenumber` nam trong dien
+ * se xoa khoi `user_tbl` cuc bo (dich cuoi chi con {sharedUserId, role,
+ * branch}), `sharedUserId` thi o lai. Nhan ban ghi de lan sau cot kia bien mat
+ * thi chi phai sua than ham nay, khong phai di sua lai tung cho goi.
+ *
+ * NEM LOI khi ban ghi co mat ma `sharedUserId` la `undefined`: do la dau hieu
+ * nguoi goi `select` thieu cot hoac quen join quan he. Tra `false` lang le o do
+ * nghia la khach vang lai bi coi la nguoi that, tren dung duong nong nhat cua
+ * he thong - on ao thi hong ngay o moi truong dev.
+ *
+ * `null`/`undefined` (don khong co chu) tra `false`: khong co ai thi khong ai
+ * la sentinel - khac han voi "co ban ghi ma khong doc duoc khoa".
+ */
+export function isDefaultCustomer(
+  user?: { sharedUserId?: string } | null,
+): boolean {
+  if (!user) return false;
+  if (user.sharedUserId === undefined) {
+    throw new Error(
+      'isDefaultCustomer: ban ghi khong mang sharedUserId (select/join thieu shared_user_id_column)',
+    );
+  }
+  return user.sharedUserId === DEFAULT_CUSTOMER_SHARED_ID;
+}

@@ -13,17 +13,11 @@ export function calculateAccumulatedPoints(
   return Math.floor((orderTotal * percentage) / 100);
 }
 
-// SDT cua sentinel khach vang lai - DUNG CHUNG voi trend qua shared-user.
-export const DEFAULT_CUSTOMER_PHONENUMBER = 'default-customer';
-
-/**
- * Check if user is default customer
- * @param phoneNumber Phone number of user
- * @returns true if user is default customer
- */
-export function isDefaultCustomer(phoneNumber: string): boolean {
-  return phoneNumber === DEFAULT_CUSTOMER_PHONENUMBER;
-}
+// `isDefaultCustomer` va `DEFAULT_CUSTOMER_PHONENUMBER` da chuyen sang
+// `src/user/user.constant.ts` o buoc 2.6: helper nhan dien theo `sharedUserId`
+// chu khong theo `phonenumber`, va ca hai phai roi thu muc nay vi
+// `accumulated-point/` bi xoa o giai doan 8 trong khi nhung nguoi goi khac
+// (`user-active.checker.ts`, `user.scheduler.ts`, script backfill) thi o lai.
 
 /**
  * Check if user is customer

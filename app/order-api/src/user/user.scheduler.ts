@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './user.entity';
 import { Repository } from 'typeorm';
-import { Cron, CronExpression, Timeout } from '@nestjs/schedule';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Role } from 'src/role/role.entity';
 import { RoleEnum } from 'src/role/role.enum';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
@@ -13,7 +13,6 @@ import { DistributeLockJobKey, QueueRegisterKey } from 'src/app/app.constants';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { UserProvisioningService } from './user-provisioning.service';
 import {
-  DEFAULT_CUSTOMER_PHONENUMBER,
   SYNC_USERS_FAST_GRID_WINDOW_MINUTES,
   SYNC_USERS_WIDE_GRID_WINDOW_HOURS,
 } from './user.constant';
@@ -80,75 +79,21 @@ export class UserScheduler {
   //   `scripts/backfill-shared-user-ids.ts` tao bang cach DOI SDT hang `root`
   //   cu - khong phai do ham khoi dong tao. `root` ben shared-user la cua trend.
 
-  // Sentinel khach vang lai `default-customer` DUNG CHUNG voi trend: hang cuc
-  // bo phai tro vao dung danh tinh sentinel ben shared-user, khong tu sinh
-  // danh tinh rieng.
+  // KHONG con `initDefaultCustomer` (buoc 2.9, chot 03/11/2026).
   //
-  // Co tinh KHONG di qua `ensureLocalUser`: ham do tu choi danh tinh co
-  // `ownerService` cua service khac (QD18), ma sentinel la ngoai le - no khong
-  // phai mot con nguoi, va dung chung toan cum bat ke cot do ghi gi.
+  // Khac `trend`: ban cua `terminal` KHONG hong - no hoi `shared-user` lay id
+  // sentinel roi gan `sharedUserId` dung, khong ghi `password`, va khong tu
+  // sinh danh tinh rieng. Van bo, vi mot ly do khac: de moi moi truong dung
+  // moi di DUNG MOT DUONG - MIGRATION cua buoc 2.10. Hai duong cung "bao dam
+  // co hang sentinel" thi khi chung khong dong y nhau se khong ai biet duong
+  // nao da chay.
   //
-  // shared-user khong tra loi luc khoi dong => chi canh bao; lan khoi dong
-  // sau thu lai. Khong tu tao hang thieu `sharedUserId`.
-  @Timeout(5000)
-  async initDefaultCustomer() {
-    const context = `${UserScheduler.name}.${this.initDefaultCustomer.name}`;
-    this.logger.log(`Initializing default customer...`, context);
-
-    const hasDefaultCustomer = await this.userRepository.exists({
-      where: {
-        phonenumber: DEFAULT_CUSTOMER_PHONENUMBER,
-      },
-    });
-    if (hasDefaultCustomer) {
-      this.logger.warn(`Default customer already existed...`, context);
-      return;
-    }
-
-    const role = await this.roleRepository.findOne({
-      where: {
-        name: RoleEnum.Customer,
-      },
-    });
-    if (!role) {
-      this.logger.warn(`Role ${RoleEnum.Customer} not found`, context);
-      return;
-    }
-
-    try {
-      const sharedSentinel =
-        await this.sharedUserServiceClient.lookupByPhonenumber(
-          DEFAULT_CUSTOMER_PHONENUMBER,
-        );
-      if (!sharedSentinel) {
-        this.logger.warn(
-          `shared-user has no '${DEFAULT_CUSTOMER_PHONENUMBER}' sentinel - local default customer NOT created`,
-          context,
-        );
-        return;
-      }
-
-      const defaultCustomer = this.userRepository.create({
-        role,
-        sharedUserId: sharedSentinel.id,
-        phonenumber: DEFAULT_CUSTOMER_PHONENUMBER,
-        firstName: 'Default',
-        lastName: 'Customer',
-        createdAt: new Date(sharedSentinel.createdAt),
-      });
-      await this.userRepository.save(defaultCustomer);
-      this.logger.log(
-        `Default customer linked to shared sentinel ${sharedSentinel.id}`,
-        context,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Error when creating default customer: ${error.message}`,
-        error.stack,
-        context,
-      );
-    }
-  }
+  // `DEFAULT_CUSTOMER_PHONENUMBER` thi O LAI `user/user.constant.ts`:
+  // `scripts/backfill-shared-user-ids.ts` con doc no (nhanh `ATTACH_SENTINEL`)
+  // va phai chay duoc o moi truong khac. Chi go import khoi tep nay.
+  //
+  // GIU `sharedUserServiceClient` va `roleRepository`: hai luoi dong bo
+  // (`syncRecentlyRegisteredUsers*`) va `updateUserRole` phia tren con dung.
 
   // ==========================================================================
   // QD19 LOP 3 + QD21 - hai luoi dinh ky keo user moi tu shared-user ve.

@@ -106,10 +106,12 @@ export const SYNC_USERS_WIDE_GRID_WINDOW_HOURS = 48;
 // y het failure mode ay, chi khac dieu kien: hang so doi DU LIEU phai khop MA,
 // env doi ENV phai khop DU LIEU. Ca hai deu hong lang le.
 //
-// Khac biet that: sentinel duoc tao boi `initDefaultCustomer` bang UUID NGAU
-// NHIEN (khong migration nao seed no), nen mot moi truong khong di len tu ban
-// mono se mang id khac. Sua bang env la mot dong cau hinh; sua bang cach ep id
-// o `shared-user` la doi KHOA CHINH cua mot hang co 18 khoa ngoai tro vao.
+// Khac biet that: hang sentinel dang chay DUOC TAO boi `initDefaultCustomer`
+// (da xoa o buoc 2.9) bang UUID NGAU NHIEN, nen mot moi truong khong di len tu
+// ban mono se mang id khac. Sua bang env la mot dong cau hinh; sua bang cach ep
+// id o `shared-user` la doi KHOA CHINH cua mot hang co 18 khoa ngoai tro vao.
+// Tu buoc 2.10, moi truong dung MOI lay hang sentinel tu migration (id co dinh
+// = gia tri mac dinh duoi day), nen env chi con can o moi truong CU co id lech.
 //
 // BA service phai khai CUNG mot gia tri - xem ghi chu o buoc 2.6 cua ke hoach.
 //
@@ -119,11 +121,14 @@ export const DEFAULT_CUSTOMER_SHARED_ID =
   process.env.DEFAULT_CUSTOMER_SHARED_ID?.trim() ||
   '3c85fc13-2887-45c1-bd4e-4fece5387d9f';
 
-// Chi con hai cho dung SDT cua sentinel: `user.scheduler.ts`
-// (`initDefaultCustomer`, xoa o buoc 2.9) va `scripts/backfill-shared-user-ids.ts`
-// (doi chieu hai DB theo SDT - script chay truoc khi co `sharedUserId`, nen no
-// khong the doc theo khoa moi). Hang nam o day thay vi o
-// `accumulated-point/` vi thu muc do bi xoa o giai doan 8, con script thi phai
+// Tu buoc 2.9 chi con DUNG MOT cho dung SDT cua sentinel:
+// `scripts/backfill-shared-user-ids.ts` (doi chieu hai DB theo SDT - script
+// chay TRUOC khi co `sharedUserId`, nen no khong the doc theo khoa moi).
+// Nguoi doc thu hai, `user.scheduler.ts` (`initDefaultCustomer`), da bi xoa
+// o 2.9.
+//
+// Hang VAN O LAI du chi con mot nguoi doc, va o day thay vi o
+// `accumulated-point/`: thu muc do bi xoa o giai doan 8, con script thi phai
 // con chay duoc o moi truong khac.
 export const DEFAULT_CUSTOMER_PHONENUMBER = 'default-customer';
 

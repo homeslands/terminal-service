@@ -159,3 +159,56 @@ export function isDefaultCustomer(
   }
   return user.sharedUserId === DEFAULT_CUSTOMER_SHARED_ID;
 }
+
+/**
+ * Chot RUNTIME cho khoa `sharedUserId` (buoc 2.11 — nhom 2C, muc 1.10 he qua 3).
+ *
+ * ## Vi sao kieu TypeScript KHONG du
+ *
+ * Gia tri hay toi tu `user?.sharedUserId`, va `?.` cho ra kieu `string` chu
+ * khong phai `string | undefined`. Nen ham nhan no **bien dich sach** roi nhan
+ * `undefined` luc chay. Khi do:
+ *
+ *   `findOne({ where: { sharedUserId: undefined } })`
+ *
+ * TypeORM **bo han dieu kien** va tra **hang dau bang** — tuc vi/diem cua
+ * mot nguoi la. Day la dung lop loi da xay ra that o buoc 2.3 (`findOneByField`
+ * voi khoa rong) va 2.4 (`lookup` the voi `code: ''`).
+ *
+ * ## Vi sao NEM chu khong roi ve `IsNull()`
+ *
+ * `IsNull()` la dung cho nhung ham ma "khong co khoa nao" la **dau vao hop le**
+ * — vd `findOneByField`, payload cua no co ca hai khoa tuy chon. O day nguoc
+ * lai: khoa la **bat buoc**, nen `undefined` khong phai mot dau vao ma la dau
+ * hieu **quan he chua nap** (thieu `relations`, hoac mot `select:` hep tay).
+ * Roi ve "khop 0 hang" se bien mot loi lap trinh thanh mot ket qua rong im
+ * lang; nem thi no hong ngay o moi truong dev.
+ *
+ * ## Bay lam moi phep kiem nhe tay bao xanh gia
+ *
+ * **175/723 hang** `user_tbl` co `id_column` **bang dung**
+ * `shared_user_id_column` — di san cua viec hai DB tach ra tu cung mot mono.
+ * Nham lan hai khoa van cho ket qua DUNG tren nhom hang do. Vi vay moi phep
+ * kiem phai dung tai khoan co `id <> sharedUserId` (muc 1.10).
+ *
+ * @param key    gia tri khoa doc duoc (thuong la `user?.sharedUserId`)
+ * @param context `TenClass.tenHam` — de log noi len tieng goi nao thieu
+ * @returns chinh `key`, da chac chan khong `undefined`, de goi duoc inline
+ */
+export function assertUserKeyLoaded(
+  key: string | undefined | null,
+  context: string,
+): string {
+  if (key === undefined || key === null || key === '') {
+    throw new Error(
+      `${context}: sharedUserId is not loaded (value ${JSON.stringify(key)}). ` +
+        `This is almost always an UNLOADED RELATION - a missing \`relations\` ` +
+        `when fetching the \`user\` row, or a hand-narrowed \`select:\` that ` +
+        `dropped shared_user_id_column. Do NOT fall back to IsNull() here: the ` +
+        `key is required, and a \`where\` holding \`undefined\` is DROPPED by ` +
+        `TypeORM, which then returns the FIRST ROW of the table - that is ` +
+        `another person's wallet or points.`,
+    );
+  }
+  return key;
+}

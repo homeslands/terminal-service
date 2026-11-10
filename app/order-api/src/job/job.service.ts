@@ -163,8 +163,17 @@ export class JobService {
 
         // add accumulated points
         try {
+          // Buoc 2.14 — 2C: khoa la `sharedUserId`, KHONG phai id cuc bo.
+          // `getOrder` nap quan he `owner.role` khong hep `select:` nen cot
+          // guong co mat; ben nhan (`addPointsForOrder`) tu goi
+          // `assertUserKeyLoaded` truoc khi dua vao `where`.
+          //
+          // ⚠ Chuoi `try/catch` nay **nuot loi** (chi `logger.error`), nen doi
+          // sai khoa o day thi job van COMPLETED, don van PAID, chi la khong
+          // ai duoc cong diem - **khong co mau do nao**. Kiem bang cach doc
+          // `accumulated_point_tbl` cua dung nguoi do, dung doc ma thoat.
           await this.accumulatedPointService.addPointsForOrder({
-            userId: order.owner.id,
+            sharedUserId: order.owner?.sharedUserId,
             orderId: order.id,
             points: order.payment?.amount,
             orderTotal: order.subtotal - order.deliveryFee,

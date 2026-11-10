@@ -35,7 +35,7 @@ import {
 import { User } from 'src/user/user.entity';
 // Buoc 2.6: helper nhan dien khach vang lai doi cho (sang `user/`) va doi chu
 // ky (nhan BAN GHI, so theo `sharedUserId`) - xem chu thich o noi khai.
-import { isDefaultCustomer } from 'src/user/user.constant';
+import { assertUserKeyLoaded, isDefaultCustomer } from 'src/user/user.constant';
 import { Order } from 'src/order/order.entity';
 import { ConfigService } from '@nestjs/config';
 import { SystemConfigService } from 'src/system-config/system-config.service';
@@ -249,13 +249,26 @@ export class AccumulatedPointService {
   async addPointsForOrder(addPointsDto: IAddPointsDto): Promise<void> {
     const context = `${AccumulatedPointService.name}.${this.addPointsForOrder.name}`;
 
+    // Tra theo `sharedUserId` (buoc 2.14 — 2C, muc 1.10), KHONG theo id cuc bo.
+    //
+    // `assertUserKeyLoaded` la bat buoc o day, khong phai de cho dep: neu khoa
+    // la `undefined` thi `findOne({ where: { sharedUserId: undefined } })` lam
+    // TypeORM **bo han dieu kien** va tra **HANG DAU BANG** - tuc cong diem cho
+    // mot nguoi la. Phep gac `!user` ngay duoi **khong** chan duoc truong hop
+    // do (no tra ve mot hang hop le). Lop loi nay da xay ra that hai lan: buoc
+    // 2.3 (`findOneByField`) va buoc 2.4 (`lookup` the).
     const user = await this.userRepository.findOne({
-      where: { id: addPointsDto.userId },
+      where: {
+        sharedUserId: assertUserKeyLoaded(addPointsDto.sharedUserId, context),
+      },
       relations: ['accumulatedPoint', 'role'],
     });
 
     if (!user) {
-      this.logger.error(`User not found: ${addPointsDto.userId}`, context);
+      this.logger.error(
+        `User not found: ${addPointsDto.sharedUserId}`,
+        context,
+      );
       throw new AccumulatedPointException(
         AccumulatedPointValidation.USER_NOT_FOUND,
       );
@@ -263,14 +276,17 @@ export class AccumulatedPointService {
 
     // Check if user is customer
     if (!isCustomer(user.role?.name)) {
-      this.logger.log(`User is not customer: ${addPointsDto.userId}`, context);
+      this.logger.log(
+        `User is not customer: ${addPointsDto.sharedUserId}`,
+        context,
+      );
       return; // Don't add points for non-customer
     }
 
     // Check if user is default customer
     if (isDefaultCustomer(user)) {
       this.logger.log(
-        `Default customer skipped for points accumulation: ${addPointsDto.userId}`,
+        `Default customer skipped for points accumulation: ${addPointsDto.sharedUserId}`,
         context,
       );
       return; // Don't add points for default customer

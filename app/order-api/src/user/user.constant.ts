@@ -1,4 +1,7 @@
+import { Logger } from '@nestjs/common';
 import { config as dotenvConfig } from 'dotenv';
+import { UserException } from './user.exception';
+import { UserValidation } from './user.validation';
 
 // Nap `.env` NGAY TAI DAY, khong trong cho `config/database.config.ts`: tep
 // hang so nay duoc evaluate rat som trong do thi import va co the chay TRUOC
@@ -184,6 +187,19 @@ export function isDefaultCustomer(
  * Roi ve "khop 0 hang" se bien mot loi lap trinh thanh mot ket qua rong im
  * lang; nem thi no hong ngay o moi truong dev.
  *
+ * ## Nem GI (doi 09/11/2026, nguoi dung chot)
+ *
+ * Nem `UserException(UserValidation.USER_NOT_FOUND)` ⇒ **400 / 137000**, chu
+ * khong phai `Error` tran nua. Ly do: `Error` tran **khong ai bat** - hai
+ * service chi dang ky `HttpExceptionFilter`, ma no khai `@Catch(HttpException)`,
+ * va khong interceptor nao co `catchError` ⇒ no roi vao `ExceptionsHandler`
+ * mac dinh cua Nest, thanh **500 khong ma loi**, body khong theo khuon
+ * `AppExceptionResponseDto`.
+ *
+ * Cau chuan doan (quan he chua nap / `select:` hep tay) **khong mat**: no ghi
+ * ra log muc `error` ngay truoc khi nem, vi message cua `AppException` di
+ * thang vao body tra cho client.
+ *
  * ## Bay lam moi phep kiem nhe tay bao xanh gia
  *
  * **175/723 hang** `user_tbl` co `id_column` **bang dung**
@@ -200,7 +216,10 @@ export function assertUserKeyLoaded(
   context: string,
 ): string {
   if (key === undefined || key === null || key === '') {
-    throw new Error(
+    // Chi tiet nam o LOG, khong nam o response: message cua `AppException` di
+    // thang vao body (`HttpExceptionFilter`) nen giu nguyen cau mac dinh cua
+    // bang ma ("User not found"), con cau chuan doan thi ghi ra log.
+    new Logger(context).error(
       `${context}: sharedUserId is not loaded (value ${JSON.stringify(key)}). ` +
         `This is almost always an UNLOADED RELATION - a missing \`relations\` ` +
         `when fetching the \`user\` row, or a hand-narrowed \`select:\` that ` +
@@ -209,6 +228,7 @@ export function assertUserKeyLoaded(
         `TypeORM, which then returns the FIRST ROW of the table - that is ` +
         `another person's wallet or points.`,
     );
+    throw new UserException(UserValidation.USER_NOT_FOUND);
   }
   return key;
 }

@@ -21,9 +21,9 @@ import {
   PointTransactionTypeEnum,
 } from 'src/gift-card-modules/point-transaction/entities/point-transaction.enum';
 import { CurrencyUtil } from 'src/shared/utils/currency.util';
-import { CreatePointTransactionDto } from 'src/gift-card-modules/point-transaction/dto/create-point-transaction.dto';
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
+import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import { InvoiceAction } from 'src/invoice/invoice.constants';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
@@ -118,15 +118,20 @@ export class JobService {
 
         // Handle calc balance when use point payment method
         if (order.payment?.paymentMethod === PaymentMethod.POINT) {
+          // MOT nguon khoa cho ca ba lenh duoi (buoc 2.12/2.13 — 2C). Doc
+          // `sharedUserId`, KHONG phai `slug`: doi ten khoa ma giu nguyen gia
+          // tri la "SOT 1" cua dot ra 12/09/2026, TypeScript khong bat duoc.
+          const sharedUserId = order.owner?.sharedUserId;
+
           // Calc balance
           await this.sharedBalanceService.calcBalance({
-            userSlug: order.owner?.slug,
+            sharedUserId,
             points: order.payment.amount,
             type: 'out',
           });
 
           const currentBalance = await this.sharedBalanceService.findOneByField(
-            { userSlug: order.owner?.slug, slug: null },
+            { sharedUserId, slug: null },
           );
 
           // Create point transaction
@@ -136,9 +141,9 @@ export class JobService {
             objectType: PointTransactionObjectTypeEnum.ORDER,
             objectSlug: order.slug,
             points: order.payment?.amount,
-            userSlug: order.owner?.slug,
+            sharedUserId,
             balance: currentBalance.points,
-          } as CreatePointTransactionDto);
+          } satisfies CreatePointTransactionPayload);
         }
 
         // confirm use accumulated points

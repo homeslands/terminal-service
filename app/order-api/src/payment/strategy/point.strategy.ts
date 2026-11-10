@@ -27,8 +27,12 @@ export class PointStrategy implements IPaymentStrategy {
 
     // Validate balance points
     if (
+      // `sharedUserId`, KHONG phai `slug`: doi ten khoa ma giu nguyen gia tri
+      // (`sharedUserId: order?.owner?.slug`) la "SOT 1" cua dot ra 12/09/2026 -
+      // TypeScript khong bat duoc vi ca hai la `string`, va hau qua la moi luot
+      // tra bang xu bao "het tien".
       await this.sharedBalanceService.validate({
-        userSlug: order?.owner?.slug,
+        sharedUserId: order?.owner?.sharedUserId,
         points: order.subtotal,
       })
     ) {

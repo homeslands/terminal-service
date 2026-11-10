@@ -38,6 +38,8 @@ import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
 import { CardOrder } from '../card-order/entities/card-order.entity';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
+import { SharedUserRefService } from 'src/shared/services/shared-user-ref.service';
+import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import _ from 'lodash';
 import { SharedExportFileService } from 'src/shared/services/shared-export-file.service';
 import { ExcelConfig } from 'src/shared/interfaces/commons/excel-config.interface';
@@ -66,6 +68,9 @@ export class PointTransactionService {
     private readonly mapper: Mapper,
     private readonly pdfService: PdfService,
     private readonly sharedPtService: SharedPointTransactionService,
+    // Buoc 2.13 — dich `userSlug` cua DTO client-facing sang `sharedUserId`
+    // ngay tai bien gioi. Xem ghi chu trong `create`.
+    private readonly sharedUserRefService: SharedUserRefService,
     private readonly sharedExportFileService: SharedExportFileService,
   ) { }
 
@@ -331,7 +336,36 @@ export class PointTransactionService {
   }
 
   async create(req: CreatePointTransactionDto) {
-    const pt = await this.sharedPtService.create(req);
+    // Day la BIEN GIOI client-facing (body cua `POST /point-transaction`):
+    // `req.userSlug` phai giu nguyen theo muc 1.4, nhung service dung chung
+    // xung ten bang `sharedUserId` tu buoc 2.13. Dich o dung day - mot cho,
+    // ngay sat bien - thay vi de khoa slug di sau vao cum vi.
+    //
+    // Dich hong thi phai ra DUNG ma cu: truoc 2.13 `userSlug` la di thang toi
+    // `findOne({ slug })` trong service dung chung roi nem `USER_NOT_FOUND`
+    // => **400 / 158508**. De helper nem `Error` tran thi route tra **500** —
+    // do song 04/11/2026 thay dung nhu vay.
+    //
+    // Doi 09/11/2026 (nguoi dung chot): gia tri khong hop le thi helper **nem
+    // thang**, khong ai phai `try/catch` va cung khong dung lop loi rieng -
+    // `toSharedUserId` nem `UserException(UserValidation.USER_NOT_FOUND)`, tuc
+    // **400 / 137000**, ma san co cua module `user`.
+    //
+    // ⚠ Hop dong route doi: ma cu cua duong nay la **158508**
+    // (`PointTransactionValidation.USER_NOT_FOUND`), nay la **137000**. Van la
+    // HTTP 400 va cung cau "User not found"; khac la **137000 CO ban dich o ca
+    // hai UI** (`toast.userNotFound`) con 158508 thi khong. Doi co chu dich,
+    // ghi o than buoc 2.13 (muc 1.4 doi tuong minh, khong am tham).
+    //
+    // Hai duong hong con lai cua helper (slug rong, thieu `sharedUserId`) nay
+    // cung ra 400 / 137000 kem log muc `error` - chung thuong la loi lap trinh,
+    // nhung mot `Error` tran thi khong ai bat, chi thanh 500 khong ma loi.
+    const { userSlug, ...rest } = req;
+    const sharedUserId = await this.sharedUserRefService.toSharedUserId(userSlug);
+    const pt = await this.sharedPtService.create({
+      ...rest,
+      sharedUserId,
+    } satisfies CreatePointTransactionPayload);
     return this.mapper.map(pt, PointTransaction, PointTransactionResponseDto);
     // const context = `${PointTransaction.name}.${this.create.name}`;
     // this.logger.log(

@@ -37,7 +37,6 @@ import {
   PointTransactionObjectTypeEnum,
   PointTransactionTypeEnum,
 } from '../point-transaction/entities/point-transaction.enum';
-import { CreatePointTransactionDto } from '../point-transaction/dto/create-point-transaction.dto';
 import _ from 'lodash';
 import {
   PaymentMethod,
@@ -50,6 +49,8 @@ import { FeatureFlagValidation } from '../feature-flag/feature-flag.validation';
 import { FeatureGroupConstant } from '../feature-flag/feature-group.constant';
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
+import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
+import { SharedUserRefService } from 'src/shared/services/shared-user-ref.service';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
 import { Payment } from 'src/payment/entity/payment.entity';
 import { CashStrategy } from 'src/payment/strategy/cash.strategy';
@@ -96,6 +97,14 @@ export class CardOrderService {
     private readonly gcService: GiftCardService,
     private readonly balanceService: SharedBalanceService,
     private readonly ptService: SharedPointTransactionService,
+    // Buoc 2.12/2.13 — 2C: tep nay CHI cam chuoi slug (`recipientSlug`,
+    // `customerSlug`) chu khong cam ban ghi `user`, vi `findOne` o day nap
+    // `relations: ['receipients', 'giftCards']` - KHONG nap `customer` hay
+    // `receipients.recipient`. Nap chung la viec cua buoc 5.1/5.2, nen o day
+    // dich slug -> sharedUserId bang helper dung o 2.11, DUNG MOT LAN moi
+    // nguoi roi dung cho moi lenh vi/so cai. Khi 5.2 nap quan he thi bo cau
+    // nay va doc `.sharedUserId` thang tu quan he.
+    private readonly sharedUserRefService: SharedUserRefService,
     private readonly cashStrategy: CashStrategy,
     private readonly paymentUtils: PaymentUtils,
     private readonly sharedCoinPolicyService: SharedCoinPolicyService,
@@ -225,7 +234,11 @@ export class CardOrderService {
         for (const receipient of cardOrder.receipients) {
           const isMaxBalancePayload: IsMaxBalancePayload = {
             totalPoints: receipient.quantity * cardOrder.cardPoint,
-            userSlug: receipient.recipientSlug,
+            // Chi cam slug o day (`receipients` nap ma `receipients.recipient`
+            // thi khong) ⇒ dich qua helper. Bo cau nay o 5.2.
+            sharedUserId: await this.sharedUserRefService.toSharedUserId(
+              receipient.recipientSlug,
+            ),
           };
           if (
             await this.sharedCoinPolicyService.isExceedBalance(
@@ -240,7 +253,9 @@ export class CardOrderService {
       case CardOrderType.SELF:
         const isMaxBalancePayload: IsMaxBalancePayload = {
           totalPoints: cardOrder.cardPoint * cardOrder.quantity,
-          userSlug: cardOrder?.customer?.slug,
+          // `customer: true` co trong `relations` o day ⇒ doc thang khoa, khong
+          // phai dich. Doc `.sharedUserId` chu KHONG `.slug` (SOT 1, 12/09).
+          sharedUserId: cardOrder?.customer?.sharedUserId,
         };
         if (
           await this.sharedCoinPolicyService.isExceedBalance(
@@ -320,7 +335,11 @@ export class CardOrderService {
         for (const receipient of cardOrder.receipients) {
           const isMaxBalancePayload: IsMaxBalancePayload = {
             totalPoints: receipient.quantity * cardOrder.cardPoint,
-            userSlug: receipient.recipientSlug,
+            // Chi cam slug o day (`receipients` nap ma `receipients.recipient`
+            // thi khong) ⇒ dich qua helper. Bo cau nay o 5.2.
+            sharedUserId: await this.sharedUserRefService.toSharedUserId(
+              receipient.recipientSlug,
+            ),
           };
           if (
             await this.sharedCoinPolicyService.isExceedBalance(
@@ -335,7 +354,9 @@ export class CardOrderService {
       case CardOrderType.SELF:
         const isMaxBalancePayload: IsMaxBalancePayload = {
           totalPoints: cardOrder.cardPoint * cardOrder.quantity,
-          userSlug: cardOrder?.customer?.slug,
+          // `customer: true` co trong `relations` o day ⇒ doc thang khoa, khong
+          // phai dich. Doc `.sharedUserId` chu KHONG `.slug` (SOT 1, 12/09).
+          sharedUserId: cardOrder?.customer?.sharedUserId,
         };
         if (
           await this.sharedCoinPolicyService.isExceedBalance(
@@ -615,7 +636,10 @@ export class CardOrderService {
 
             const isMaxBalancePayload: IsMaxBalancePayload = {
               totalPoints: createReceipientDto.quantity * card.points,
-              userSlug: createReceipientDto.recipientSlug,
+              // Chi cam slug tu DTO ⇒ dich qua helper.
+              sharedUserId: await this.sharedUserRefService.toSharedUserId(
+                createReceipientDto.recipientSlug,
+              ),
             };
             if (
               await this.sharedCoinPolicyService.isExceedBalance(
@@ -653,7 +677,8 @@ export class CardOrderService {
       case CardOrderType.SELF:
         const isMaxBalancePayload: IsMaxBalancePayload = {
           totalPoints: createCardOrderDto.quantity * card.points,
-          userSlug: customer.slug,
+          // Co ban ghi `customer` tai cho ⇒ doc thang `.sharedUserId`.
+          sharedUserId: customer.sharedUserId,
         };
         if (
           await this.sharedCoinPolicyService.isExceedBalance(
@@ -860,15 +885,19 @@ export class CardOrderService {
             totalAmount += databaseEntity.cardPoint;
           }
 
+          // MOT nguon khoa cho ca ba lenh cua nguoi nhan nay.
+          const recipientSharedUserId =
+            await this.sharedUserRefService.toSharedUserId(recipientSlug);
+
           // Update recipient balance ONCE after all cards
           await this.balanceService.calcBalance({
-            userSlug: recipientSlug,
+            sharedUserId: recipientSharedUserId,
             points: totalAmount,
             type: PointTransactionTypeEnum.IN,
           });
 
           const currentBalance = await this.balanceService.findOneByField({
-            userSlug: recipientSlug,
+            sharedUserId: recipientSharedUserId,
             slug: null,
           });
 
@@ -879,9 +908,9 @@ export class CardOrderService {
             objectType: PointTransactionObjectTypeEnum.CARD_ORDER,
             objectSlug: databaseEntity.slug,
             points: totalAmount,
-            userSlug: recipientSlug,
+            sharedUserId: recipientSharedUserId,
             balance: currentBalance.points,
-          } as CreatePointTransactionDto);
+          } satisfies CreatePointTransactionPayload);
         }
         break;
       case CardOrderType.SELF:
@@ -903,15 +932,21 @@ export class CardOrderService {
           totalAmount += databaseEntity.cardPoint;
         }
 
+        // MOT nguon khoa cho ca ba lenh cua chu don.
+        const customerSharedUserId =
+          await this.sharedUserRefService.toSharedUserId(
+            databaseEntity.customerSlug,
+          );
+
         //  Update recipient balance ONCE after all cards
         await this.balanceService.calcBalance({
-          userSlug: databaseEntity.customerSlug,
+          sharedUserId: customerSharedUserId,
           points: totalAmount,
           type: PointTransactionTypeEnum.IN,
         });
 
         const currentBalance = await this.balanceService.findOneByField({
-          userSlug: databaseEntity.customerSlug,
+          sharedUserId: customerSharedUserId,
           slug: null,
         });
 
@@ -921,9 +956,9 @@ export class CardOrderService {
           objectType: PointTransactionObjectTypeEnum.CARD_ORDER,
           objectSlug: databaseEntity.slug,
           points: totalAmount,
-          userSlug: databaseEntity.customerSlug,
+          sharedUserId: customerSharedUserId,
           balance: currentBalance.points,
-        } as CreatePointTransactionDto);
+        } satisfies CreatePointTransactionPayload);
 
         break;
       case CardOrderType.BUY:

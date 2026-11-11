@@ -76,6 +76,7 @@ import { VoucherGroupException } from 'src/voucher-group/voucher-group.exception
 import { VoucherGroupValidation } from 'src/voucher-group/voucher-group.validation';
 import { UserException } from 'src/user/user.exception';
 import { UserValidation } from 'src/user/user.validation';
+import { isDefaultCustomer } from 'src/user/user.constant';
 
 @Injectable()
 export class VoucherService {
@@ -680,7 +681,7 @@ export class VoucherService {
     if (
       user &&
       user.role?.name === RoleEnum.Customer &&
-      user.phonenumber !== 'default-customer'
+      !isDefaultCustomer(user)
     ) {
       // voucher for user group
       qb.leftJoin('voucher.voucherUserGroups', 'vug')

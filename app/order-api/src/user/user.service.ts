@@ -42,6 +42,7 @@ import { AuthValidation } from 'src/auth/auth.validation';
 import { RoleEnum } from 'src/role/role.enum';
 import { AuthProfileResponseDto } from 'src/auth/auth.dto';
 import {
+  DEFAULT_CUSTOMER_SHARED_ID,
   LOOKUP_ON_MISS_PHONENUMBER_PATTERN,
   LOOKUP_ON_MISS_TIMEOUT_MS,
   SYNC_RECENT_USERS_THROTTLE_KEY,
@@ -67,9 +68,6 @@ import {
   toUserRequirementResponses,
 } from 'src/external-services/shared-user-service/shared-user-shape.mapper';
 import { UserProvisioningService } from './user-provisioning.service';
-// Dung lai helper da co thay vi viet lai literal 'default-customer' - xem
-// lookupRecipient rang buoc 4a.
-import { isDefaultCustomer } from 'src/accumulated-point/accumulated-point.utils';
 
 // Ma loi `USER_NOT_FOUND` cua `shared-user` (user.validation.ts: 137000) -
 // nam trong BODY, HTTP status la 400. Xem toSharedUserCommandError.
@@ -1173,9 +1171,14 @@ export class UserService {
     );
     if (!sharedUser) return [];
 
-    // Rang buoc 4a: sentinel khach vang lai khong phai mot con nguoi. Dung
-    // chung helper `isDefaultCustomer` thay vi viet lai literal.
-    if (isDefaultCustomer(sharedUser.phonenumber)) {
+    // Rang buoc 4a: sentinel khach vang lai khong phai mot con nguoi.
+    //
+    // Cho nay KHONG goi `isDefaultCustomer`: doi tuong o day la danh tinh lay
+    // tu `shared-user`, khoa cua no la `id` chu khong phai `sharedUserId` cua
+    // mot hang cuc bo. Nhoi `{ sharedUserId: sharedUser.id }` vao helper chi
+    // de goi duoc helper thi them mot lop doc cho nguoi doc ma khong them phep
+    // gac nao - so thang voi hang so (buoc 2.6).
+    if (sharedUser.id === DEFAULT_CUSTOMER_SHARED_ID) {
       this.logger.warn(
         `Recipient lookup hit the walk-in sentinel, ignored`,
         context,

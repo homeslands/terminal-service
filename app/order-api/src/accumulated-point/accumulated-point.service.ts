@@ -30,10 +30,12 @@ import { AccumulatedPointValidation } from './accumulated-point.validation';
 import {
   calculateAccumulatedPoints,
   isCustomer,
-  isDefaultCustomer,
   validatePointsUsage,
 } from './accumulated-point.utils';
 import { User } from 'src/user/user.entity';
+// Buoc 2.6: helper nhan dien khach vang lai doi cho (sang `user/`) va doi chu
+// ky (nhan BAN GHI, so theo `sharedUserId`) - xem chu thich o noi khai.
+import { isDefaultCustomer } from 'src/user/user.constant';
 import { Order } from 'src/order/order.entity';
 import { ConfigService } from '@nestjs/config';
 import { SystemConfigService } from 'src/system-config/system-config.service';
@@ -99,7 +101,7 @@ export class AccumulatedPointService {
     }
 
     // Check if user is default customer
-    if (isDefaultCustomer(user.phonenumber)) {
+    if (isDefaultCustomer(user)) {
       this.logger.warn(
         `Default customer cannot view points history: ${userSlug}`,
         context,
@@ -217,7 +219,7 @@ export class AccumulatedPointService {
     }
 
     // Check if user is default customer
-    if (isDefaultCustomer(user.phonenumber)) {
+    if (isDefaultCustomer(user)) {
       this.logger.warn(
         `Default customer cannot accumulate points: ${userSlug}`,
         context,
@@ -266,7 +268,7 @@ export class AccumulatedPointService {
     }
 
     // Check if user is default customer
-    if (isDefaultCustomer(user.phonenumber)) {
+    if (isDefaultCustomer(user)) {
       this.logger.log(
         `Default customer skipped for points accumulation: ${addPointsDto.userId}`,
         context,
@@ -389,7 +391,7 @@ export class AccumulatedPointService {
     }
 
     // Check if user is default customer
-    if (isDefaultCustomer(user.phonenumber)) {
+    if (isDefaultCustomer(user)) {
       this.logger.warn(
         `Default customer cannot use points: ${orderSlug}`,
         context,
@@ -647,7 +649,7 @@ export class AccumulatedPointService {
       return; // No points to reserve, skip
     }
 
-    if (isDefaultCustomer(reservation.accumulatedPoint.user.phonenumber)) {
+    if (isDefaultCustomer(reservation.accumulatedPoint.user)) {
       this.logger.log(
         `Default customer cannot use points: ${orderId}`,
         context,

@@ -43,6 +43,11 @@ import { SystemConfigKey } from 'src/system-config/system-config.constant';
 import { OrderStatus } from 'src/order/order.constants';
 import { OrderException } from 'src/order/order.exception';
 import { OrderValidation } from 'src/order/order.validation';
+import {
+  orderRef,
+  parseOrderRef,
+  SERVICE_PREFIX,
+} from 'src/shared/constants/service-ref.constant';
 
 @Injectable()
 export class AccumulatedPointService {
@@ -350,6 +355,61 @@ export class AccumulatedPointService {
   /**
    * Reserve points when apply for order (not actually subtract points)
    */
+  /**
+   * Gac tien to cua tham chieu don (buoc 2.15 — 2C).
+   *
+   * `parseOrderRef` **co y khong tu quyet dinh** khi tien to la cua service
+   * khac - no chi tra `service` ra cho ben goi chot. Day la cho chot do, gom
+   * mot lan cho ca bon ham.
+   *
+   * NEM chu khong `return` em. Bon ham diem tra don tren `terminal_db` theo
+   * `order: { slug }`, nen mot ref cua service khac - hoac mot slug tran quen
+   * boc `orderRef()` - khong khop hang nao, va
+   * `handleCancelReservation` thi **`return` em** khi khong thay reservation
+   * ⇒ loi se bien thanh "khong lam gi ca": giu cho diem khong bao gio duoc
+   * nha, khong mot dong log nao noi vi sao. Ke hoach goi dung hinh dang nay la
+   * **nguon loi so mot** cua buoc 2.15.
+   *
+   * Khach khong gui duoc ref (hai route client-facing nhan `slug` roi tu boc
+   * `orderRef(slug)`), nen den day la ma noi bo truyen sai ⇒ giu mot dong
+   * `logger.error` de con duong lan ra, va nem ma co san 159011 thay vi
+   * `Error` tran (bai hoc buoc 2.13: khong co filter catch-all nao bat `Error`,
+   * no thanh 500 khong ma loi).
+   */
+  private assertLocalOrderRef(
+    service: string | null,
+    ref: string,
+    context: string,
+  ): void {
+    if (service === SERVICE_PREFIX) return;
+
+    this.logger.error(
+      `${context}: order reference "${ref}" does not belong to this service ` +
+        `(expected prefix "${SERVICE_PREFIX}", got ${service === null ? 'no prefix' : `"${service}"`}). ` +
+        `No client can send a reference - the two client-facing routes wrap orderRef(slug) themselves - ` +
+        `so this is a bug in the calling code. Throwing 159011 ORDER_NOT_FOUND instead of looking up a ` +
+        `slug that cannot match and returning silently.`,
+      context,
+    );
+    throw new AccumulatedPointException(
+      AccumulatedPointValidation.ORDER_NOT_FOUND,
+    );
+  }
+
+  /**
+   * Nhan `orderSlug` tu route, KHONG nhan tham chieu co tien to (chot
+   * 10/11/2026).
+   *
+   * Hai ham duoc controller goi (`reservePointsForOrder`, `cancelReservation`)
+   * nhan **slug tran**: controller la bien VAO, no noi ngon ngu client. Truoc
+   * do controller phai `orderRef(slug)` roi ham nay **boc nguoc lai ngay** de
+   * tra cuc bo - boc/bo trong cung mot request. Viec dung tham chieu la viec
+   * cua service, va service tu lam: xem `cancelReservation` goi
+   * `orderRef(orderSlug)` khi chuyen tiep xuong `handleCancelReservation`.
+   *
+   * Hai ham con lai (`confirmPointsUsage`, `handleCancelReservation`) van nhan
+   * **tham chieu** vi chung duoc goi tu NGOAI module (job, order, order-item).
+   */
   async reservePointsForOrder(
     orderSlug: string,
     pointsToUse: number,
@@ -536,21 +596,33 @@ export class AccumulatedPointService {
   /**
    * Confirm points usage when order is paid successfully
    */
-  async confirmPointsUsage(orderId: string): Promise<void> {
+  async confirmPointsUsage(ref: string): Promise<void> {
     const context = `${AccumulatedPointService.name}.${this.confirmPointsUsage.name}`;
+
+    // Buoc 2.15 — 2C: nhan `terminal:<orderSlug>` thay cho `order.id` cuc bo.
+    const { service, orderSlug } = parseOrderRef(ref);
+    this.assertLocalOrderRef(service, ref, context);
 
     // Find reservation pending for this order
     const reservation = await this.transactionHistoryRepository.findOne({
       where: {
-        order: { id: orderId },
+        order: { slug: orderSlug },
         type: AccumulatedPointTransactionType.RESERVE,
         status: AccumulatedPointTransactionStatus.PENDING,
       },
-      relations: ['accumulatedPoint'],
+      // `order` nap thêm o buoc 2.15: ham nay khong con cam `order.id`, ma
+      // `createTransactionHistory` (private, dung chung voi `addPointsForOrder`
+      // cua buoc 2.14 — da chot) van nhan id cuc bo. Lay tu chinh hang vua tra
+      // thay vi them mot query, va **khong** doi chu ky helper do de khong lan
+      // vao buoc da commit. Cot FK nay roi bang o giai doan 8.
+      relations: ['accumulatedPoint', 'order'],
     });
 
     if (!reservation) {
-      this.logger.log(`No reserved points found for order ${orderId}`, context);
+      this.logger.log(
+        `No reserved points found for order ${orderSlug} (ref ${ref})`,
+        context,
+      );
       return; // No points to reserve, skip
     }
 
@@ -566,7 +638,7 @@ export class AccumulatedPointService {
       // Create record USE to tracking
       await this.createTransactionHistory({
         accumulatedPoint,
-        orderId,
+        orderId: reservation.order.id,
         type: AccumulatedPointTransactionType.USE,
         points: pointsToUse,
         lastPoints: reservation.lastPoints,
@@ -575,7 +647,7 @@ export class AccumulatedPointService {
       });
 
       this.logger.log(
-        `Confirmed ${pointsToUse} points usage for order ${orderId}. New balance: ${accumulatedPoint.totalPoints}`,
+        `Confirmed ${pointsToUse} points usage for order ${orderSlug}. New balance: ${accumulatedPoint.totalPoints}`,
         context,
       );
     } catch (error) {
@@ -593,6 +665,7 @@ export class AccumulatedPointService {
   /**
    * Cancel reservation if exists, refund points if confirmed
    */
+  /** Nhan `orderSlug` tu route - xem chu thich o `reservePointsForOrder`. */
   async cancelReservation(
     orderSlug: string,
     createdUserId: string,
@@ -608,7 +681,10 @@ export class AccumulatedPointService {
       throw new OrderException(OrderValidation.ORDER_NOT_FOUND);
     }
 
-    await this.handleCancelReservation(order.id, createdUserId);
+    // Buoc 2.15 — 2C: `handleCancelReservation` nhan **tham chieu** (no con
+    // sau cho goi khac tu ngoai module), nen SERVICE dung ref o day - khong de
+    // controller lam viec do.
+    await this.handleCancelReservation(orderRef(orderSlug), createdUserId);
     // Update subtotal and accumulated points to use in order
     const subtotalBeforeUseAccumulatedPoints =
       order.subtotal + order.accumulatedPointsToUse;
@@ -623,34 +699,51 @@ export class AccumulatedPointService {
    * Cancel reservation if exists, refund points if confirmed
    */
   async handleCancelReservation(
-    orderId: string,
+    ref: string,
     createdUserId?: string | null,
   ): Promise<void> {
     const context = `${AccumulatedPointService.name}.${this.handleCancelReservation.name}`;
 
+    // Buoc 2.15 — 2C: nhan `terminal:<orderSlug>` thay cho `order.id` cuc bo.
+    const { service, orderSlug } = parseOrderRef(ref);
+    this.assertLocalOrderRef(service, ref, context);
+
+    // LOG TAM, ke hoach buoc 2.15 doi, GIU TRONG SUOT 2C - dung xoa truoc 7.7d.
+    //
+    // Ham nay co BA duong `return` em ben duoi. Mot ref sai thi khong khop hang
+    // nao, nen no roi vao duong `return` dau tien va giu cho diem **khong bao
+    // gio duoc nha** - khong mot mau do nao. Sau 2.15 co **sau** cho goi tu
+    // ngoai module, nen khi doi soat phai biet duoc tung luot nhan ref gi.
+    this.logger.log(`handleCancelReservation received ref=${ref}`, context);
+
     const reservation = await this.transactionHistoryRepository.findOne({
       where: {
-        order: { id: orderId },
+        order: { slug: orderSlug },
         type: AccumulatedPointTransactionType.RESERVE,
         status: AccumulatedPointTransactionStatus.PENDING,
       },
-      relations: ['accumulatedPoint.user.role'],
+      // `order` nap thêm o buoc 2.15 — cung ly do nhu `confirmPointsUsage`:
+      // `createTransactionHistory` van nhan id cuc bo.
+      relations: ['accumulatedPoint.user.role', 'order'],
     });
 
     if (!reservation) {
-      this.logger.log(`No reserved points found for order ${orderId}`, context);
+      this.logger.log(
+        `No reserved points found for order ${orderSlug} (ref ${ref})`,
+        context,
+      );
       return; // No points to reserve, skip
     }
     if (!reservation.accumulatedPoint) {
       this.logger.log(
-        `No accumulated point found for order ${orderId}`,
+        `No accumulated point found for order ${orderSlug} (ref ${ref})`,
         context,
       );
       return; // No points to reserve, skip
     }
     if (!reservation.accumulatedPoint.user) {
       this.logger.log(
-        `No user found for accumulated point ${orderId}`,
+        `No user found for accumulated point, order ${orderSlug} (ref ${ref})`,
         context,
       );
       return; // No points to reserve, skip
@@ -667,7 +760,7 @@ export class AccumulatedPointService {
 
     if (isDefaultCustomer(reservation.accumulatedPoint.user)) {
       this.logger.log(
-        `Default customer cannot use points: ${orderId}`,
+        `Default customer cannot use points: ${orderSlug} (ref ${ref})`,
         context,
       );
       return; // No points to reserve, skip
@@ -686,7 +779,7 @@ export class AccumulatedPointService {
     // Create refund transaction history
     await this.createTransactionHistory({
       accumulatedPoint,
-      orderId,
+      orderId: reservation.order.id,
       type: AccumulatedPointTransactionType.REFUND,
       points: reservation.points,
       lastPoints: accumulatedPoint.totalPoints,
@@ -695,7 +788,7 @@ export class AccumulatedPointService {
     });
 
     this.logger.log(
-      `Refunded ${reservation.points} confirmed points for cancelled/expired order ${orderId}`,
+      `Refunded ${reservation.points} confirmed points for cancelled/expired order ${orderSlug} (ref ${ref})`,
       context,
     );
   }

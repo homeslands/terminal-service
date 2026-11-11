@@ -19,6 +19,40 @@
  * dung mot lan o day thi khong phai nghi lai ba lan.
  */
 
+import { Logger } from '@nestjs/common';
+import { OrderException } from 'src/order/order.exception';
+import { OrderValidation } from 'src/order/order.validation';
+
+/**
+ * ## Vi sao hai ham duoi nem `OrderException` chu khong `Error` tran
+ *
+ * Doi 11/11/2026. Ban dau chung nem `new Error(...)`. Bai hoc do duoc o buoc
+ * 2.13: hai service **khong co filter catch-all** (`HttpExceptionFilter` khai
+ * `@Catch(HttpException)`, khong interceptor nao co `catchError`), nen mot
+ * `Error` tran roi vao `ExceptionsHandler` mac dinh cua Nest va thanh
+ * **500 khong ma loi**, body con khong theo khuon `AppExceptionResponseDto`.
+ *
+ * Ma dung la **`OrderValidation.INVALID_ORDER_SLUG` (1010014, "Invalid order
+ * slug")** - ma **da co san**, khong dat moi. Ba ly do:
+ *
+ * 1. Dung nghia: thu khong hop le o day la **khoa don hang** trong tham chieu.
+ * 2. **Ca hai UI da dich san** (`toast.invalidOrderSlug` -> "Mã đơn hàng không
+ *    hợp lệ"), da kiem `locales/{vi,en}/toast.json` cua ca `trend-ui` lan
+ *    `terminal-ui`. Dat ma moi thi phai sua ca hai UI cho mot duong **khach
+ *    khong goi toi duoc** - xem diem 3.
+ * 3. Day la **loi lap trinh, khong phai loi khach gui**: khach khong gui duoc
+ *    tham chieu (hai route client-facing nhan `slug` tu `@Param`, controller
+ *    chuyen thang cho service), va `orderRef` chi duoc goi voi `order.slug`
+ *    cua mot hang vua tra. Vi vay cau chan doan di xuong **`logger.error`** de
+ *    con duong lan ra, con body tra ve giu nguyen cau mac dinh cua bang ma -
+ *    dung khuon `assertUserKeyLoaded` (`user/user.constant.ts`).
+ *
+ * Khong co vong import: `order.validation` chi keo `app/app.validation`, va
+ * khong tep `*.validation.ts`/`*.exception.ts` nao import lai tep nay (da
+ * grep). Khong tep `*.validation.ts` nao doc `process.env` nen viec keo chung
+ * vao som hon trong do thi import khong doi hanh vi nao.
+ */
+
 /**
  * Tien to cua service nay trong moi tham chieu mem.
  *
@@ -43,13 +77,31 @@ const REF_SEPARATOR = ':';
  * trong tay chua, vi vai cho chi cam `order.id`.
  */
 export function orderRef(orderSlug: string): string {
+  const context = 'service-ref.constant.orderRef';
+
   if (!orderSlug) {
-    throw new Error(
-      `orderRef: orderSlug is empty or undefined. A bare "${SERVICE_PREFIX}${REF_SEPARATOR}" ` +
-        `reference would write a ledger row that resolves to no order. ` +
-        `A call site holding only order.id must look the slug up first.`,
+    new Logger(context).error(
+      `${context}: orderSlug is empty or undefined (value ${JSON.stringify(orderSlug)}). ` +
+        `A bare "${SERVICE_PREFIX}${REF_SEPARATOR}" reference would write a ledger row that ` +
+        `resolves to no order. A call site holding only order.id must look the slug up first - ` +
+        `see step 2.15. Throwing 1010014 INVALID_ORDER_SLUG.`,
     );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
   }
+
+  if (orderSlug.includes(REF_SEPARATOR)) {
+    // Mot slug KHONG chua dau phan cach. Chuoi co dau phan cach o day gan nhu
+    // chac chan la mot tham chieu DA boc roi (`terminal:abc`) bi boc lan thu hai,
+    // hoac mot khoa idempotent cua buoc 5.5 (`terminal:abc:debit`). Ca hai se
+    // sinh ra `terminal:terminal:abc` - mot tham chieu khong tra ra don nao.
+    new Logger(context).error(
+      `${context}: orderSlug "${orderSlug}" already contains "${REF_SEPARATOR}". ` +
+        `A slug never does. This is either a reference being wrapped twice, or a step-5.5 ` +
+        `idempotency key passed in by mistake. Throwing 1010014 INVALID_ORDER_SLUG.`,
+    );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
+  }
+
   return `${SERVICE_PREFIX}${REF_SEPARATOR}${orderSlug}`;
 }
 
@@ -68,7 +120,7 @@ export interface ParsedOrderRef {
  *
  * ⚠ **KHONG tu quyet dinh gi khi tien to la cua service KHAC.** Tra ve
  * `service` de ben goi tu chot. Ly do: bon ham diem o 2.15 tra don theo
- * `order: { slug }` tren `terminal_db`; mot ref cua `trend` se khong khop hang
+ * `order: { slug }` tren `terminal_db`; mot ref cua `terminal` se khong khop hang
  * nao va `handleCancelReservation` thi **`return` em** khi khong tim thay
  * reservation. Tuc neu ham nay im lang tra `orderSlug` cua service khac, loi
  * se bien thanh "khong lam gi ca" — dung hinh dang hong lang le ma ke hoach
@@ -79,17 +131,66 @@ export interface ParsedOrderRef {
  * them hau to (`terminal:<orderSlug>:debit`) nen khong boc bang ham nay.
  */
 export function parseOrderRef(ref: string): ParsedOrderRef {
+  const context = 'service-ref.constant.parseOrderRef';
+
   if (!ref) {
-    throw new Error(
-      `parseOrderRef: ref is empty or undefined - nothing to parse.`,
+    new Logger(context).error(
+      `${context}: ref is empty or undefined (value ${JSON.stringify(ref)}) - nothing to parse. ` +
+        `No client can send a reference: the two client-facing routes take \`slug\` from ` +
+        `@Param and the controller hands it straight to the service, so this is a bug in the ` +
+        `calling code. Throwing 1010014 INVALID_ORDER_SLUG.`,
     );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
   }
 
   const at = ref.indexOf(REF_SEPARATOR);
   if (at <= 0) {
-    // Khong co tien to: hang lich su (truoc 2.15) ghi khoa tran.
+    // Khong co tien to nhan ra duoc: hang lich su (truoc 2.15) ghi khoa tran.
+    //
+    // KHONG nem o day - do la hop dong co y cua ham nay: tra `service: null`
+    // ra cho BEN GOI chot. Ben goi (`assertLocalOrderRef` trong
+    // `accumulated-point.service.ts`) so `service !== SERVICE_PREFIX` roi nem,
+    // nen duong nay van hong ON AO, khong im lang.
+    //
+    // `at === 0` (ref bat dau bang dau phan cach, vd ":abc") cung roi vao day:
+    // `SERVICE_PREFIX` khong bao gio rong nen `orderRef()` khong sinh duoc
+    // chuoi nhu vay, va `service: null` lam ben goi tu chen no.
     return { service: null, orderSlug: ref };
   }
 
-  return { service: ref.slice(0, at), orderSlug: ref.slice(at + 1) };
+  const orderSlug = ref.slice(at + 1);
+
+  // Hai hinh dang hong ma ban truoc tra ve IM LANG, va chung di qua duoc ca
+  // phep gac tien to vi `service` khop:
+  //
+  //   `terminal:`          -> { service: 'terminal', orderSlug: '' }
+  //   `terminal:abc:debit` -> { service: 'terminal', orderSlug: 'abc:debit' }
+  //
+  // Ca hai roi vao `findOne({ where: { slug } })` khong khop hang nao, va
+  // `handleCancelReservation` thi **`return` em** khi khong thay reservation
+  // ⇒ loi thanh "khong lam gi ca": giu cho diem khong bao gio duoc nha. Dung
+  // hinh dang hong lang le ma ke hoach goi la nguon loi so mot cua buoc 2.15.
+  if (!orderSlug) {
+    new Logger(context).error(
+      `${context}: ref "${ref}" has the prefix but no slug after it. ` +
+        `Throwing 1010014 INVALID_ORDER_SLUG instead of looking up an empty slug that ` +
+        `cannot match and returning silently.`,
+    );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
+  }
+
+  if (orderSlug.includes(REF_SEPARATOR)) {
+    // Buoc 5.5 dung khoa idempotent co HAU TO (`terminal:<orderSlug>:debit`).
+    // Chu thich cua ham nay van noi "chi dung cho dau ra cua `orderRef()`" -
+    // nay co phep gac that, khong con chi la mot cau nhac.
+    new Logger(context).error(
+      `${context}: ref "${ref}" has more than one "${REF_SEPARATOR}". This function only ` +
+        `parses orderRef() output; a step-5.5 idempotency key such as ` +
+        `"${SERVICE_PREFIX}${REF_SEPARATOR}<orderSlug>${REF_SEPARATOR}debit" must NOT be parsed ` +
+        `with it. Throwing 1010014 INVALID_ORDER_SLUG.`,
+    );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
+  }
+
+  return { service: ref.slice(0, at), orderSlug };
 }

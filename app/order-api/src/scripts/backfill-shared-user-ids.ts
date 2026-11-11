@@ -79,7 +79,7 @@ import {
   isRetiredPhonenumber,
   retireLocalUser,
 } from '../user/user-retire.helper';
-import { DEFAULT_CUSTOMER_PHONENUMBER } from '../accumulated-point/accumulated-point.utils';
+import { DEFAULT_CUSTOMER_PHONENUMBER } from '../user/user.constant';
 import { INTERNAL_SERVICE_NAME } from '../common/constants/internal-api.constant';
 
 // Cua so du rong de lay TOAN BO nguoi ben shared-user. Client tu phan trang.

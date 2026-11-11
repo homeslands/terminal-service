@@ -42,6 +42,12 @@ services:
       DATABASE_HOST: ${DATABASE_HOST}
       DATABASE_PORT: ${DATABASE_PORT}
 
+      # Khach vang lai (sentinel): id_column cua hang 'default-customer' ben
+      # shared-user. `trend` va `terminal` phai khai CUNG mot gia tri; shared-user
+      # khong doc bien nay (khong co cho goi - xem buoc 2.6 ke hoach giai doan 2).
+      # Bo trong => dung mac dinh trong ma.
+      DEFAULT_CUSTOMER_SHARED_ID: ${DEFAULT_CUSTOMER_SHARED_ID}
+
       # Token
       SALT_ROUNDS: ${SALT_ROUNDS}
       DURATION: ${DURATION}

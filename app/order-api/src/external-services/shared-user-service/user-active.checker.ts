@@ -7,9 +7,9 @@ import {
   SharedUserLookupResponse,
   SharedUserServiceClient,
 } from './shared-user-service.client';
-// Dung lai dung helper da co thay vi tu viet lai literal 'default-customer'
+// Dung lai dung helper da co thay vi tu viet lai phep nhan dien sentinel
 // - xem ghi chu "khach vang lai" trong assertActive ben duoi.
-import { isDefaultCustomer } from 'src/accumulated-point/accumulated-point.utils';
+import { isDefaultCustomer } from 'src/user/user.constant';
 
 /**
  * Thay cho ham `checkActiveUser` cu (`src/auth/auth.utils.ts`), von doc cot
@@ -67,17 +67,19 @@ export class UserActiveChecker {
     // som de khong ton 1 luot goi mang tren dung duong nong nhat cua he
     // thong (moi don ban tai quay deu di qua day).
     //
-    // ⚠️ Cho nay doc `user.phonenumber` - mot cot NAM TRONG DIEN SE XOA, vi
-    // dich cuoi cua `user_tbl` ben terminal chi con {sharedUserId, role,
-    // branch}. Co tinh KHONG tu nghi ra co che nhan dien moi o day: sentinel
-    // 'default-customer' hien duoc nhan dien bang `phonenumber` o 15 cho
-    // khap terminal (order, payment, auth, voucher, accumulated-point,
-    // user.clause, user.scheduler...), nen no phai duoc thiet ke lai MOT
-    // LAN cho ca 15 cho o giai doan 2, khong phai va rieng o day. Dung
-    // chung helper `isDefaultCustomer` de cho nay di cung mot don vi di doi
-    // voi 14 cho kia, thay vi them mot literal roi roi thu 15.
+    // Tu buoc 2.6 cho nay doc `user.sharedUserId`, KHONG con doc
+    // `phonenumber`: cot do nam trong dien se xoa, vi dich cuoi cua
+    // `user_tbl` ben terminal chi con {sharedUserId, role, branch}. Ghi chu cu
+    // o day noi "phai thiet ke lai MOT LAN cho ca 15 cho" - do la viec cua 2B2
+    // (buoc 2.6 doi hang so + helper, 2.7 nam phep so con lai + hai cho tra
+    // sentinel, 2.9 xoa `initDefaultCustomer`; terminal khong co buoc 2.8),
+    // nen cho nay di cung mot don vi di doi voi nhung cho kia.
+    //
+    // `isDefaultCustomer` NEM LOI khi ban ghi khong mang `sharedUserId`: nguoi
+    // goi `select` thieu cot thi vo o day, khong phai lang le coi khach vang
+    // lai la nguoi that roi di goi `lookup` bang `undefined`.
     // Xem danh sach chan day du o progress/terminal-api.md, giai doan 2.
-    if (isDefaultCustomer(user.phonenumber)) return null;
+    if (isDefaultCustomer(user)) return null;
 
     const identity = await this.sharedUserServiceClient.lookupById(
       user.sharedUserId,

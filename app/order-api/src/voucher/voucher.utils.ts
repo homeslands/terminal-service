@@ -29,6 +29,7 @@ import { SystemConfigKey } from 'src/system-config/system-config.constant';
 import moment from 'moment';
 import { User } from 'src/user/user.entity';
 import { OrderItem } from 'src/order-item/order-item.entity';
+import { isDefaultCustomer } from 'src/user/user.constant';
 
 @Injectable()
 export class VoucherUtils {
@@ -234,10 +235,7 @@ export class VoucherUtils {
 
     // user login
     if (user) {
-      if (
-        user.role?.name === RoleEnum.Customer &&
-        user.phonenumber !== 'default-customer'
-      ) {
+      if (user.role?.name === RoleEnum.Customer && !isDefaultCustomer(user)) {
         // user order
         if (voucher.isVerificationIdentity) {
           // check user already verify email or not

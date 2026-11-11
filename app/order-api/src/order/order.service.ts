@@ -90,6 +90,7 @@ import {
   DEFAULT_CUSTOMER_SHARED_ID,
   isDefaultCustomer,
 } from 'src/user/user.constant';
+import { orderRef } from 'src/shared/constants/service-ref.constant';
 @Injectable()
 export class OrderService {
   constructor(
@@ -227,8 +228,9 @@ export class OrderService {
     const removedOrder = await this.transactionManagerService.execute<Order>(
       async (manager) => {
         // Cancel accumulated points reservation
+        // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`, khong phai id cuc bo.
         await this.accumulatedPointService.handleCancelReservation(
-          order.id,
+          orderRef(order.slug),
           null,
         );
         // Update subtotal and accumulated points to use in order
@@ -688,8 +690,9 @@ export class OrderService {
         }
 
         // Cancel accumulated points reservation
+        // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`, khong phai id cuc bo.
         await this.accumulatedPointService.handleCancelReservation(
-          order.id,
+          orderRef(order.slug),
           null,
         );
         // Update accumulated points to use in order

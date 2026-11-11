@@ -38,6 +38,7 @@ import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point
 import { FeatureFlagSystems } from 'src/feature-flag-system/feature-flag-system.constant';
 import { FeatureSystemGroups } from 'src/feature-flag-system/feature-flag-system.constant';
 import { FeatureFlagSystemService } from 'src/feature-flag-system/feature-flag-system.service';
+import { orderRef } from 'src/shared/constants/service-ref.constant';
 import { ChefOrderUtils } from 'src/chef-order/chef-order.utils';
 
 @Injectable()
@@ -407,8 +408,12 @@ export class OrderItemService {
         if (voucher) await manager.save(voucher);
 
         // Cancel accumulated points reservation
+        // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`. Ca bon cho trong
+        // tep nay deu co `order.slug`: ba cho lay tu `orderUtils.getOrder`
+        // (nap du cot), cho thu tu nhan `order` qua tham so tu
+        // `_prepareAndSaveOrderItem` - cung mot `getOrder`.
         await this.accumulatedPointService.handleCancelReservation(
-          order.id,
+          orderRef(order.slug),
           null,
         );
         // Update accumulated points to use in order
@@ -612,8 +617,12 @@ export class OrderItemService {
         if (voucher) await manager.save(voucher);
 
         // Cancel accumulated points reservation
+        // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`. Ca bon cho trong
+        // tep nay deu co `order.slug`: ba cho lay tu `orderUtils.getOrder`
+        // (nap du cot), cho thu tu nhan `order` qua tham so tu
+        // `_prepareAndSaveOrderItem` - cung mot `getOrder`.
         await this.accumulatedPointService.handleCancelReservation(
-          order.id,
+          orderRef(order.slug),
           null,
         );
         // Update accumulated points to use in order
@@ -869,7 +878,13 @@ export class OrderItemService {
       manager,
     );
 
-    await this.accumulatedPointService.handleCancelReservation(order.id, null);
+    // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`. `order` vao day qua
+    // tham so tu `_prepareAndSaveOrderItem`, noi no tra bang
+    // `orderUtils.getOrder` - dong ngay duoi cua ham do da dung `order.slug`.
+    await this.accumulatedPointService.handleCancelReservation(
+      orderRef(order.slug),
+      null,
+    );
     order.accumulatedPointsToUse = 0;
 
     await manager.save(order);
@@ -996,8 +1011,12 @@ export class OrderItemService {
           );
         }
 
+        // Buoc 2.15 — 2C: **chỗ gọi thứ 11, CHỈ `terminal` có** (route
+        // `POST /order-items/batch`; `trend` chỉ có 10 chỗ). Tham chiếu
+        // `terminal:<orderSlug>`; `order` tra bằng `orderUtils.getOrder` ở đầu
+        // `createOrderItemsBatch` nên `order.slug` chắc chắn có.
         await this.accumulatedPointService.handleCancelReservation(
-          order.id,
+          orderRef(order.slug),
           null,
         );
         order.accumulatedPointsToUse = 0;

@@ -26,6 +26,7 @@ import {
 import { Invoice } from 'src/invoice/invoice.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
+import { orderRef } from 'src/shared/constants/service-ref.constant';
 
 @Injectable()
 export class OrderUtils {
@@ -200,7 +201,12 @@ export class OrderUtils {
     const removedOrder = await this.transactionManagerService.execute<Order>(
       async (manager) => {
         // Cancel accumulated points reservation
-        await this.accumulatedPointService.handleCancelReservation(order.id);
+        // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`. `order` o day tra
+        // tu `findOne({ where: { slug: orderSlug } })` khong hep `select:` nen
+        // `order.slug` chac chan co.
+        await this.accumulatedPointService.handleCancelReservation(
+          orderRef(order.slug),
+        );
         // Update subtotal and accumulated points to use in order
         const subtotalBeforeUseAccumulatedPoints =
           order.subtotal + order.accumulatedPointsToUse;

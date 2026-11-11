@@ -708,13 +708,17 @@ export class AccumulatedPointService {
     const { service, orderSlug } = parseOrderRef(ref);
     this.assertLocalOrderRef(service, ref, context);
 
-    // LOG TAM, ke hoach buoc 2.15 doi, GIU TRONG SUOT 2C - dung xoa truoc 7.7d.
+    // Log tam cua buoc 2.15 (in ra `ref` nhan duoc) DA GO o buoc 2.16 - dung
+    // han cua no la "suot 2C", tuc het o 2.15; muc Viec cua 2.16 ghi ro "go log
+    // tam cua buoc 2.15". Chu thich o lan sua 10/11 ghi "giu toi 7.7d" la SAI,
+    // da go cung lan nay.
     //
-    // Ham nay co BA duong `return` em ben duoi. Mot ref sai thi khong khop hang
-    // nao, nen no roi vao duong `return` dau tien va giu cho diem **khong bao
-    // gio duoc nha** - khong mot mau do nao. Sau 2.15 co **sau** cho goi tu
-    // ngoai module, nen khi doi soat phai biet duoc tung luot nhan ref gi.
-    this.logger.log(`handleCancelReservation received ref=${ref}`, context);
+    // Ba duong `return` em ben duoi van la cho hong LANG: mot ref sai khong
+    // khop hang nao nen roi vao duong dau tien, va giu cho diem khong bao gio
+    // duoc nha. Cai thay cho log tam la ca quet tinh cua buoc 2.15 (moi cho goi
+    // phai truyen `orderRef(order.slug)`) cong phep gac tien to
+    // `assertLocalOrderRef` - ca hai hong ON AO, khong can mot dong log moi
+    // luot nua.
 
     const reservation = await this.transactionHistoryRepository.findOne({
       where: {

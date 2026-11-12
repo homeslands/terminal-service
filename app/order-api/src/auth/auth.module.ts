@@ -15,12 +15,8 @@ import { FileModule } from 'src/file/file.module';
 import { MailModule } from 'src/mail/mail.module';
 import { Role } from 'src/role/role.entity';
 import { SystemConfigModule } from 'src/system-config/system-config.module';
-import { VerifyEmailToken } from './entity/verify-email-token.entity';
 import { DbModule } from 'src/db/db.module';
 import { AuthUtils } from './auth.utils';
-import { ZaloOaConnectorConfig } from 'src/zalo-oa-connector/entity/zalo-oa-connector.entity';
-import { VerifyPhoneNumberToken } from './entity/verify-phone-number-token.entity';
-import { RegisterOtpToken } from './entity/register-otp-token.entity';
 import { ZaloOaConnectorModule } from 'src/zalo-oa-connector/zalo-oa-connector.module';
 import { SharedModule } from 'src/shared/shared.module';
 import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
@@ -45,10 +41,6 @@ import { UserProvisioningModule } from 'src/user/user-provisioning.module';
       User,
       Branch,
       Role,
-      VerifyEmailToken,
-      ZaloOaConnectorConfig,
-      VerifyPhoneNumberToken,
-      RegisterOtpToken,
     ]),
     ConfigModule,
     FileModule,

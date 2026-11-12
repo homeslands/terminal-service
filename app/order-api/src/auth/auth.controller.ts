@@ -1,21 +1,12 @@
 import {
-  Body,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
-  Post,
   ValidationPipe,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import {
-  AuthProfileResponseDto,
-  InitiateVerifyEmailRequestDto,
-  ConfirmEmailVerificationCodeRequestDto,
-  VerifyEmailResponseDto,
-  VerifyPhoneNumberResponseDto,
-  ConfirmPhoneNumberVerificationCodeRequestDto,
-} from './auth.dto';
+import { AuthProfileResponseDto } from './auth.dto';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -26,158 +17,18 @@ import { AppResponseDto } from 'src/app/app.dto';
 import { ApiResponseWithType } from 'src/app/app.decorator';
 import { CurrentUser } from '../user/user.decorator';
 import { CurrentUserDto, UserScopeDto } from 'src/user/user.dto';
-import { Throttle } from '@nestjs/throttler';
+
+// Buoc 3.2: SAU route xac minh email/SDT da xoa khoi `terminal` (ban that o
+// `shared-user`, `terminal-ui` goi qua `httpAuth` - `api/auth.ts`). Controller
+// nay chi con hai route doc: `GET /auth/profile` va `GET /auth/scope` - ca hai
+// GIU NGUYEN shape cu (muc 1.4). Vi khong con route `@Post` nao, cac import
+// `Body`, `Post`, `Throttle` va nam DTO xac minh cung roi theo.
 
 @ApiTags('Authentication')
 @ApiBearerAuth()
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
-  @HttpCode(HttpStatus.OK)
-  @Post('initiate-verify-email')
-  @ApiOperation({ summary: 'Initiate verify email' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiResponseWithType({
-    type: VerifyEmailResponseDto,
-    description: 'Initiate verify email successful',
-  })
-  async initiateVerifyEmail(
-    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
-    user: CurrentUserDto,
-    @Body(new ValidationPipe({ transform: true }))
-    requestData: InitiateVerifyEmailRequestDto,
-  ) {
-    const result = await this.authService.initiateVerifyEmail(
-      user,
-      requestData,
-    );
-    const response = {
-      message: 'Initiate verify email successful',
-      statusCode: HttpStatus.CREATED,
-      timestamp: new Date().toISOString(),
-      result,
-    } as AppResponseDto<VerifyEmailResponseDto>;
-    return response;
-  }
-
-  @Throttle({ default: { limit: 1, ttl: 60000 } })
-  @HttpCode(HttpStatus.OK)
-  @Post('resend-verify-email')
-  @ApiOperation({ summary: 'Resend verify email' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiResponseWithType({
-    type: VerifyEmailResponseDto,
-    description: 'Resend verify email code successful',
-  })
-  async resendVerifyEmailCode(
-    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
-    user: CurrentUserDto,
-  ) {
-    const result = await this.authService.resendVerifyEmailCode(user);
-    const response = {
-      message: 'Resend verify email code successful',
-      statusCode: HttpStatus.CREATED,
-      timestamp: new Date().toISOString(),
-      result,
-    } as AppResponseDto<VerifyEmailResponseDto>;
-    return response;
-  }
-
-  @HttpCode(HttpStatus.OK)
-  @Post('confirm-email-verification/code')
-  @ApiOperation({ summary: 'Confirm email verification' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiResponseWithType({
-    type: String,
-    description: 'Confirm email verification successful',
-  })
-  async confirmVerifyEmailCode(
-    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
-    user: CurrentUserDto,
-    @Body(new ValidationPipe({ transform: true }))
-    requestData: ConfirmEmailVerificationCodeRequestDto,
-  ) {
-    await this.authService.confirmEmailVerificationCode(user, requestData);
-    const response = {
-      message: 'Confirm email verification successful',
-      statusCode: HttpStatus.CREATED,
-      timestamp: new Date().toISOString(),
-      result: 'Confirm email verification successful',
-    } as AppResponseDto<string>;
-    return response;
-  }
-
-  @HttpCode(HttpStatus.OK)
-  @Post('initiate-verify-phone-number')
-  @ApiOperation({ summary: 'Initiate verify phone number' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiResponseWithType({
-    type: VerifyPhoneNumberResponseDto,
-    description: 'Initiate verify phone number successful',
-  })
-  async initiateVerifyPhoneNumber(
-    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
-    user: CurrentUserDto,
-  ) {
-    const result = await this.authService.initiateVerifyPhoneNumber(user);
-    const response = {
-      message: 'Initiate verify phone number successful',
-      statusCode: HttpStatus.CREATED,
-      timestamp: new Date().toISOString(),
-      result,
-    } as AppResponseDto<VerifyPhoneNumberResponseDto>;
-    return response;
-  }
-
-  @Throttle({ default: { limit: 2, ttl: 60000 } })
-  @HttpCode(HttpStatus.OK)
-  @Post('resend-verify-phone-number')
-  @ApiOperation({ summary: 'Resend verify phone number' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiResponseWithType({
-    type: VerifyPhoneNumberResponseDto,
-    description: 'Resend verify phone number code successful',
-  })
-  async resendVerifyPhoneNumberCode(
-    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
-    user: CurrentUserDto,
-  ) {
-    const result = await this.authService.resendVerifyPhoneNumberCode(user);
-    const response = {
-      message: 'Resend verify phone number code successful',
-      statusCode: HttpStatus.CREATED,
-      timestamp: new Date().toISOString(),
-      result,
-    } as AppResponseDto<VerifyPhoneNumberResponseDto>;
-    return response;
-  }
-
-  @HttpCode(HttpStatus.OK)
-  @Post('confirm-phone-number-verification/code')
-  @ApiOperation({ summary: 'Confirm phone number verification' })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  @ApiResponseWithType({
-    type: String,
-    description: 'Confirm phone number verification successful',
-  })
-  async confirmVerifyPhoneNumberCode(
-    @CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))
-    user: CurrentUserDto,
-    @Body(new ValidationPipe({ transform: true }))
-    requestData: ConfirmPhoneNumberVerificationCodeRequestDto,
-  ) {
-    await this.authService.confirmPhoneNumberVerificationCode(
-      user,
-      requestData,
-    );
-    const response = {
-      message: 'Confirm phone number verification successful',
-      statusCode: HttpStatus.CREATED,
-      timestamp: new Date().toISOString(),
-      result: 'Confirm phone number verification successful',
-    } as AppResponseDto<string>;
-    return response;
-  }
 
   @HttpCode(HttpStatus.OK)
   @Get('profile')

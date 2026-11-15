@@ -7,8 +7,6 @@ import {
 } from './zalo-oa-connector.dto';
 import { ZaloOaConnectorConfig } from './entity/zalo-oa-connector.entity';
 import { AutomapperProfile, InjectMapper } from '@automapper/nestjs';
-import { VerifyPhoneNumberToken } from 'src/auth/entity/verify-phone-number-token.entity';
-import { VerifyPhoneNumberResponseDto } from 'src/auth/auth.dto';
 
 @Injectable()
 export class ZaloOaConnectorProfile extends AutomapperProfile {
@@ -28,7 +26,6 @@ export class ZaloOaConnectorProfile extends AutomapperProfile {
         ZaloOaConnectorConfig,
         ZaloOaConnectorConfigResponseDto,
       );
-      createMap(mapper, VerifyPhoneNumberToken, VerifyPhoneNumberResponseDto);
     };
   }
 }

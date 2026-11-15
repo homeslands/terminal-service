@@ -1,9 +1,8 @@
 export enum IgnoreEntites {
-  // one-time / short-lived auth tokens
-  REGISTER_OTP_TOKEN = 'RegisterOtpToken',
-  VERIFY_EMAIL_TOKEN = 'VerifyEmailToken',
-  VERIFY_PHONE_NUMBER_TOKEN = 'VerifyPhoneNumberToken',
-  FORGOT_PASSWORD_TOKEN = 'ForgotPasswordToken',
+  // Buoc 3.3: bon ten token (`RegisterOtpToken`, `VerifyEmailToken`,
+  // `VerifyPhoneNumberToken`, `ForgotPasswordToken`) da roi khoi danh sach nay
+  // cung voi bon tep entity. Enum nay loc theo TEN CLASS entity, nen giu ten
+  // cua entity khong con ton tai chi lam nguoi doc sau tuong con bang.
   // push notification device tokens
   FIREBASE_DEVICE_TOKEN = 'FirebaseDeviceToken',
   // third-party integration credentials / access tokens / secrets

@@ -1,239 +1,29 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsDate,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Matches,
-} from 'class-validator';
-import {
-  // INVALID_DOB,
-  // INVALID_EMAIL,
-  // INVALID_FIRSTNAME,
-  // INVALID_LASTNAME,
-  INVALID_PASSWORD,
-  INVALID_PHONENUMBER,
-} from './auth.validation';
+import { Matches } from 'class-validator';
 import { AutoMap } from '@automapper/classes';
 import { BranchResponseDto } from 'src/branch/branch.dto';
 import { RoleResponseDto } from 'src/role/role.dto';
-import { VerificationMethod } from './auth.constants';
 import { UserRequirementResponseDto } from 'src/user/user.dto';
 
-export class LoginAuthRequestDto {
-  @ApiProperty({ example: '0376295216' })
-  @IsNotEmpty({ message: INVALID_PHONENUMBER })
-  @AutoMap()
-  phonenumber: string;
-
-  @ApiProperty({ example: 'password' })
-  @IsNotEmpty({
-    message: INVALID_PASSWORD,
-  })
-  @AutoMap()
-  password: string;
-}
-export class RegisterAuthRequestDto extends LoginAuthRequestDto {
-  @ApiProperty({ example: 'John' })
-  // @IsNotEmpty({ message: INVALID_FIRSTNAME })
-  @IsOptional()
-  @AutoMap()
-  firstName: string;
-
-  @ApiProperty({ example: 'Doe' })
-  // @IsNotEmpty({ message: INVALID_LASTNAME })
-  @IsOptional()
-  @AutoMap()
-  lastName: string;
-
-  @ApiProperty()
-  // @IsNotEmpty({ message: INVALID_EMAIL })
-  @IsOptional()
-  @AutoMap()
-  email?: string;
-
-  @ApiProperty()
-  @IsOptional()
-  @AutoMap()
-  @Matches(/^(0[1-9]|[12]\d|3[0-1])\/(0[1-9]|1[0-2])\/(19|20)\d{2}$/, {
-    message: 'Invalid day of birth format dd/mm/yyyy',
-  }) // @IsNotEmpty({ message: INVALID_DOB })
-  dob?: string;
-}
-
-export class DeleteAccountRequestDto {
-  @ApiProperty({ example: 'password' })
-  @IsNotEmpty({ message: INVALID_PASSWORD })
-  @IsString()
-  password: string;
-}
-
-export class LoginAuthResponseDto {
-  @ApiProperty()
-  readonly accessToken: string;
-
-  @ApiProperty()
-  readonly refreshToken: string;
-
-  @ApiProperty()
-  readonly expireTime: string;
-
-  @ApiProperty()
-  readonly expireTimeRefreshToken: string;
-}
-
-export class AuthRefreshRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  accessToken: string;
-
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  refreshToken: string;
-}
-export class AuthChangePasswordRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  oldPassword: string;
-
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  newPassword: string;
-}
-
-export class ForgotPasswordTokenRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsOptional()
-  email?: string;
-
-  @ApiProperty()
-  @AutoMap()
-  @IsOptional()
-  phonenumber?: string;
-
-  @ApiProperty()
-  @AutoMap()
-  @IsNotEmpty()
-  @IsString()
-  @IsEnum(VerificationMethod)
-  verificationMethod: string;
-}
-
-export class ConfirmForgotPasswordRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  code: string;
-}
-export class ChangeForgotPasswordRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  newPassword: string;
-
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  token: string;
-}
-export class ConfirmForgotPasswordResponseDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  token: string;
-}
-
-export class ForgotPasswordRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  token: string;
-
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  newPassword: string;
-}
-
-export class ForgotPasswordResponseDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsDate()
-  expiresAt: Date;
-}
-
-export class InitiateVerifyEmailRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  email: string;
-}
-export class VerifyEmailResponseDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsDate()
-  expiresAt: Date;
-}
-export class VerifyPhoneNumberResponseDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsDate()
-  expiresAt: Date;
-}
-export class ConfirmEmailVerificationCodeRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  code: string;
-}
-export class ConfirmPhoneNumberVerificationCodeRequestDto {
-  @ApiProperty()
-  @AutoMap()
-  @IsString()
-  code: string;
-}
-
-export class UpdateAuthProfileRequestDto {
-  @ApiProperty({ example: 'John' })
-  @AutoMap()
-  // @IsNotEmpty({ message: INVALID_FIRSTNAME })
-  @IsOptional()
-  readonly firstName?: string;
-
-  @ApiProperty({ example: 'Doe' })
-  @AutoMap()
-  // @IsNotEmpty({ message: INVALID_LASTNAME })
-  @IsOptional()
-  readonly lastName?: string;
-
-  @ApiProperty({ example: '01/01/1990' })
-  @AutoMap()
-  @IsOptional()
-  @Matches(/^(0[1-9]|[12]\d|3[0-1])\/(0[1-9]|1[0-2])\/(19|20)\d{2}$/, {
-    message: 'Invalid day of birth format dd/mm/yyyy',
-  })
-  readonly dob?: string;
-
-  @ApiProperty({ example: 'johndoe@gmail.com' })
-  @AutoMap()
-  @IsOptional()
-  readonly email?: string;
-
-  @ApiProperty({ example: 'Jl. Raya' })
-  @AutoMap()
-  readonly address: string;
-
-  @ApiProperty({ example: 'XOT7hr58Q' })
-  @AutoMap()
-  readonly branch: string;
-}
-
+/**
+ * Buoc 3.3 (giai doan 3) - tep nay chi con DUNG HAI class:
+ * `AuthProfileResponseDto` (route `GET /auth/profile`) va `AuthJwtPayload`
+ * (`JwtStrategy` doc payload token).
+ *
+ * Hai muoi ba class kia da xoa. Chung phuc vu dang nhap / dang ky / quen mat
+ * khau / xac minh email-SDT - nhung nghiep vu thuoc ve `shared-user` tu giai
+ * doan 1, va sau buoc 3.2 khong con route hay method nao o day doc chung.
+ * Do 12/11/2026 TUNG class mot: ngoai thu muc `auth/` khong tep nao import
+ * chung; ba ngoai le la `VerifyPhoneNumberResponseDto` (chi
+ * `zalo-oa-connector.mapper.ts` dung), `ForgotPasswordResponseDto` va
+ * `InitiateRegisterResponseDto` (chi `auth.mapper.ts` dung) - ca ba map do
+ * cung bi xoa trong chinh buoc nay.
+ *
+ * GIU `isVerifiedEmail` / `isVerifiedPhonenumber` tren DTO phan hoi: hai field
+ * nay lay gia tri tu identity cua `shared-user` (xem `auth.service.ts`),
+ * khong phai tu cot cuc bo - bo chung la doi shape phan hoi (muc 1.4), va cot
+ * cuc bo thi den giai doan 4.7 moi doi ten.
+ */
 export class AuthProfileResponseDto {
   @AutoMap()
   @ApiProperty()
@@ -295,85 +85,6 @@ export class AuthProfileResponseDto {
   userRequirements: UserRequirementResponseDto[];
 }
 
-// PickType: Get the fields from AuthProfileResponseDto
-export class RegisterAuthResponseDto {
-  @ApiProperty()
-  @AutoMap()
-  slug: string;
-
-  @ApiProperty()
-  @AutoMap()
-  phonenumber: string;
-
-  @ApiProperty()
-  @AutoMap()
-  firstName?: string;
-
-  @ApiProperty()
-  @AutoMap()
-  lastName?: string;
-}
-
-export class InitiateRegisterRequestDto {
-  @ApiProperty({ example: '0376295216' })
-  @IsNotEmpty({ message: INVALID_PHONENUMBER })
-  phonenumber: string;
-}
-
-export class InitiateRegisterResponseDto {
-  @ApiProperty()
-  @AutoMap()
-  expiresAt: Date;
-}
-
-export class ResendRegisterOtpRequestDto {
-  @ApiProperty({ example: '0376295216' })
-  @IsNotEmpty({ message: INVALID_PHONENUMBER })
-  phonenumber: string;
-}
-
-export class CompleteRegisterRequestDto {
-  @ApiProperty({ example: '0376295216' })
-  @IsNotEmpty({ message: INVALID_PHONENUMBER })
-  phonenumber: string;
-
-  @ApiProperty({ example: 'A1B2C3' })
-  @IsString()
-  @IsNotEmpty()
-  otp: string;
-
-  @ApiProperty({ example: 'password' })
-  @IsNotEmpty({ message: INVALID_PASSWORD })
-  password: string;
-
-  @ApiProperty({ example: 'John', required: false })
-  @IsOptional()
-  @IsString()
-  firstName?: string;
-
-  @ApiProperty({ example: 'Doe', required: false })
-  @IsOptional()
-  @IsString()
-  lastName?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  email?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @Matches(/^(0[1-9]|[12]\d|3[0-1])\/(0[1-9]|1[0-2])\/(19|20)\d{2}$/, {
-    message: 'Invalid day of birth format dd/mm/yyyy',
-  })
-  dob?: string;
-}
-
-// Payload do `shared-user` ky, dung BA field (shared-user/.../auth.dto.ts).
-//
-// `scope?: string` da bi BO: token moi khong bao gio mang no. Giu lai la de
-// lai mot field LUON `undefined` ma ma nguon van tuong doc duoc - va do chinh
-// la co che cua lo "dang nhap duoc nhung menu trong" o phia UI. Quyen/role
-// lay qua `GET /auth/scope`, dung lai tu DB tren MOI request.
 export class AuthJwtPayload {
   sub: string;
   jti: string;

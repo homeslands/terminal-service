@@ -10,12 +10,9 @@ import { Base } from 'src/app/base.entity';
 import { AutoMap } from '@automapper/classes';
 import { Branch } from 'src/branch/branch.entity';
 import { Order } from 'src/order/order.entity';
-import { ForgotPasswordToken } from 'src/auth/entity/forgot-password-token.entity';
 import { Role } from 'src/role/role.entity';
-import { VerifyEmailToken } from 'src/auth/entity/verify-email-token.entity';
 import { CardOrder } from 'src/gift-card-modules/card-order/entities/card-order.entity';
 import { Recipient } from 'src/gift-card-modules/receipient/entities/receipient.entity';
-import { VerifyPhoneNumberToken } from 'src/auth/entity/verify-phone-number-token.entity';
 import { PointTransaction } from 'src/gift-card-modules/point-transaction/entities/point-transaction.entity';
 import { GiftCard } from 'src/gift-card-modules/gift-card/entities/gift-card.entity';
 import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
@@ -107,9 +104,6 @@ export class User extends Base {
   @OneToMany(() => Order, (order) => order.approvalBy)
   approvalOrders: Order[];
 
-  @OneToMany(() => ForgotPasswordToken, (token) => token.user)
-  forgotPasswordTokens: ForgotPasswordToken[];
-
   // One to one with role
   @ManyToOne(() => Role, (role) => role.users)
   @JoinColumn({ name: 'role_column' })
@@ -120,18 +114,9 @@ export class User extends Base {
   @AutoMap()
   isVerifiedEmail: boolean;
 
-  @OneToMany(() => VerifyEmailToken, (token) => token.user)
-  verifyEmailTokens: VerifyEmailToken[];
-
   @Column({ name: 'is_verified_phonenumber_column', default: false })
   @AutoMap()
   isVerifiedPhonenumber: boolean;
-
-  @OneToMany(
-    () => VerifyPhoneNumberToken,
-    (verifyPhoneNumberToken) => verifyPhoneNumberToken.user,
-  )
-  verifyPhoneNumberTokens: VerifyPhoneNumberToken[];
 
   @OneToMany(() => CardOrder, (cardOrder) => cardOrder.customer, {
     onDelete: 'SET NULL',

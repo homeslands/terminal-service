@@ -39,6 +39,12 @@ import { AuthValidation } from 'src/auth/auth.validation';
 import { CardOrder } from '../card-order/entities/card-order.entity';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
 import { SharedUserRefService } from 'src/shared/services/shared-user-ref.service';
+import {
+  applyNestedUserIsActive,
+  assignNestedUserIsActive,
+  batchLookupSharedUserIdentities,
+} from 'src/user/user.helper';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import _ from 'lodash';
 import { SharedExportFileService } from 'src/shared/services/shared-export-file.service';
@@ -72,6 +78,8 @@ export class PointTransactionService {
     // ngay tai bien gioi. Xem ghi chu trong `create`.
     private readonly sharedUserRefService: SharedUserRefService,
     private readonly sharedExportFileService: SharedExportFileService,
+    // Buoc 3.4 - `user.isActive` lay tu shared-user (applyNestedUserIsActive).
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) { }
 
   async analyze(req: FindAllPointTransactionDto) {
@@ -362,11 +370,26 @@ export class PointTransactionService {
     // nhung mot `Error` tran thi khong ai bat, chi thanh 500 khong ma loi.
     const { userSlug, ...rest } = req;
     const sharedUserId = await this.sharedUserRefService.toSharedUserId(userSlug);
+    // Buoc 3.4 - tra `isActive` TRUOC khi ghi: shared-user hong thi 503 ngay
+    // day, khi chua ghi gi. Tra SAU khi ghi thi client nhan 503 cho mot giao
+    // dich DA tao - goi lai la cong diem hai lan.
+    const userIdentityById = await batchLookupSharedUserIdentities(
+      [sharedUserId],
+      this.sharedUserServiceClient,
+      this.logger,
+      `${PointTransactionService.name}.${this.create.name}`,
+    );
     const pt = await this.sharedPtService.create({
       ...rest,
       sharedUserId,
     } satisfies CreatePointTransactionPayload);
-    return this.mapper.map(pt, PointTransaction, PointTransactionResponseDto);
+    const response = this.mapper.map(
+      pt,
+      PointTransaction,
+      PointTransactionResponseDto,
+    );
+    assignNestedUserIsActive([[pt.user, response.user]], userIdentityById);
+    return response;
     // const context = `${PointTransaction.name}.${this.create.name}`;
     // this.logger.log(
     //   `Create point transaction req; ${JSON.stringify(req)}`,
@@ -552,6 +575,12 @@ export class PointTransactionService {
       PointTransaction,
       PointTransactionResponseDto,
     );
+    await applyNestedUserIsActive(
+      pts.map((pt, index) => [pt.user, cardsResponse[index]?.user] as const),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
     // Calculate total pages
     const totalPages = Math.ceil(total / size);
     // Determine hasNext and hasPrevious
@@ -583,6 +612,17 @@ export class PointTransactionService {
       throw new PointTransactionException(
         PointTransactionValidation.POINT_TRANSACTION_NOT_FOUND,
       );
-    return this.mapper.map(pt, PointTransaction, PointTransactionResponseDto);
+    const response = this.mapper.map(
+      pt,
+      PointTransaction,
+      PointTransactionResponseDto,
+    );
+    await applyNestedUserIsActive(
+      [[pt.user, response.user]],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return response;
   }
 }

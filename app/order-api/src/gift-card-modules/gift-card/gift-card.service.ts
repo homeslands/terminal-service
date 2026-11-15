@@ -39,6 +39,12 @@ import { CoinPolicyKeyEnum } from '../coin-policy/coin-policy.enum';
 import { CoinPolicyException } from '../coin-policy/coin-policy.exception';
 import { CoinPolicyValidation } from '../coin-policy/coin-policy.validation';
 import { assertUserKeyLoaded } from 'src/user/user.constant';
+import {
+  applyNestedUserIsActive,
+  assignNestedUserIsActive,
+  batchLookupSharedUserIdentities,
+} from 'src/user/user.helper';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 
 @Injectable()
 export class GiftCardService {
@@ -67,10 +73,27 @@ export class GiftCardService {
     // private readonly ptService: PointTransactionService,
     private readonly balanceService: SharedBalanceService,
     private readonly ptService: SharedPointTransactionService,
+    // Buoc 3.4 - `usedBy.isActive` lay tu shared-user (applyNestedUserIsActive).
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) { }
 
   async use(req: UseGiftCardDto) {
     const context = `${GiftCardService.name}.${this.use.name}`;
+
+    // Buoc 3.4 - tra `isActive` cua nguoi nhan TRUOC moi lenh ghi (`redeem`
+    // luu the, roi cong so du, tao giao dich diem): shared-user hong thi 503
+    // ngay day, khi chua ghi gi. Tra SAU thi client nhan 503 cho mot the DA
+    // dung. `redeem` tu tim lai user va nem USER_NOT_FOUND - o day chi can
+    // `sharedUserId`; khong thay user thi khong goi shared-user.
+    const recipient = await this.userRepository.findOne({
+      where: { slug: req.userSlug },
+    });
+    const recipientIdentityById = await batchLookupSharedUserIdentities(
+      [recipient?.sharedUserId],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
 
     // 2. Auto-redeem
     const gc = await this.redeem(req);
@@ -110,7 +133,12 @@ export class GiftCardService {
     } satisfies CreatePointTransactionPayload);
 
 
-    return this.mapper.map(gc, GiftCard, GiftCardResponseDto);
+    const response = this.mapper.map(gc, GiftCard, GiftCardResponseDto);
+    assignNestedUserIsActive(
+      [[gc.usedBy, response.usedBy]],
+      recipientIdentityById,
+    );
+    return response;
   }
 
   async findOne(slug: string) {
@@ -171,6 +199,12 @@ export class GiftCardService {
       gcs,
       GiftCard,
       GiftCardResponseDto,
+    );
+    await applyNestedUserIsActive(
+      gcs.map((gc, index) => [gc.usedBy, gcsResponse[index]?.usedBy] as const),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
     );
 
     // Calculate total pages

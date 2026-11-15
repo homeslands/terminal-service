@@ -256,7 +256,7 @@ export class VoucherController {
   async findOnePublic(
     @Query(new ValidationPipe({ transform: true })) option: GetVoucherDto,
   ) {
-    const result = await this.voucherService.findOne(option);
+    const result = await this.voucherService.findOnePublic(option);
     return {
       message: 'Voucher has been retrieved successfully',
       statusCode: HttpStatus.OK,

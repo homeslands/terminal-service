@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { EntityManager } from 'typeorm';
 import { User } from './user.entity';
+import {
+  readLocalIsActiveOf,
+  writeLocalIsActive,
+} from './user-legacy-column.helper';
 
 /**
  * RETIRE mot hang `user_tbl` cua terminal - dung cho luot backfill
@@ -20,6 +24,11 @@ import { User } from './user.entity';
  *   co the trung id that cua mot nguoi khac ben shared-user va `ensureLocalUser`
  *   se tra nham hang nay cho nguoi do.
  * - Gia tri cu duoc chep vao `user_retire_backup_tbl` TRUOC khi ghi de.
+ *
+ * Cot khoa cuc bo (`is_active_column`, tu buoc 3.4 la
+ * `_deprecated_is_active_column`) KHONG con la field cua entity: doc/ghi qua
+ * `user-legacy-column.helper.ts`, SQL tho do ten cot - tep nay chay tren
+ * staging/prod SAU moi migration (Phu luc D, quy dinh 2).
  */
 
 export const RETIRED_PREFIX = 'retired-';
@@ -50,11 +59,15 @@ export interface UserBackupMeta {
 
 // Chep gia tri HIEN TAI cua `user` vao bang sao luu. Goi TRUOC moi lenh ghi de
 // identity, trong cung `manager` (cung transaction) voi lenh ghi do.
+//
+// Trang thai khoa doc tu DB (khong tu object `user`): entity khong con giu no,
+// va doc trong cung transaction thi dung gia tri ngay truoc lenh ghi de.
 export async function backupUser(
   manager: EntityManager,
   user: User,
   meta: UserBackupMeta,
 ): Promise<void> {
+  const oldLocalActive = await readLocalIsActiveOf(manager, user.id);
   await manager.query(
     `INSERT INTO \`user_retire_backup_tbl\` (
       \`id_column\`, \`run_id_column\`, \`action_column\`, \`reason_column\`,
@@ -81,11 +94,7 @@ export async function backupUser(
       user.dobDM ?? null,
       user.address ?? null,
       user.image ?? null,
-      user.isActive === undefined || user.isActive === null
-        ? null
-        : user.isActive
-          ? 1
-          : 0,
+      oldLocalActive === null ? null : oldLocalActive ? 1 : 0,
     ],
   );
 }
@@ -113,8 +122,9 @@ export async function retireLocalUser(
       email: null,
       address: null,
       image: null,
-      isActive: false,
     });
-    return tx.save(User, user);
+    const saved = await tx.save(User, user);
+    await writeLocalIsActive(tx, user.id, false);
+    return saved;
   });
 }

@@ -65,11 +65,15 @@ import { UserGroupException } from 'src/user-group/user-group.exception';
 import { UserGroupValidation } from 'src/user-group/user-group.validation';
 import { User } from 'src/user/user.entity';
 import {
-  applyNestedUserIsActive,
   assignNestedUserIsActive,
   batchLookupSharedUserIdentities,
+  FULL_IDENTITY_FIELDS,
+  mergeSharedUserIdentityInto,
 } from 'src/user/user.helper';
-import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
 import { SharedUserUnavailableException } from 'src/external-services/shared-user-service/shared-user-service.exception';
 import { Product } from 'src/product/product.entity';
 import { RoleEnum } from 'src/role/role.enum';
@@ -113,8 +117,8 @@ export class VoucherService {
     private readonly productUtils: ProductUtils,
     @InjectRepository(VoucherPaymentMethod)
     private readonly voucherPaymentMethodRepository: Repository<VoucherPaymentMethod>,
-    // Buoc 3.4 - `assignedUser.isActive` lay tu shared-user
-    // (applyNestedUserIsActive), khong con tu cot cuc bo.
+    // Buoc 3.4 - `assignedUser.isActive`, buoc 4.6 - identity cua
+    // `assignedUser`: lay tu shared-user, khong con tu cot cuc bo.
     private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
@@ -388,6 +392,7 @@ export class VoucherService {
         );
       },
     );
+    this.mergeAssignedUserIdentity(createdVoucher, assignedUserIdentityById);
     const response = this.mapper.map(
       createdVoucher,
       Voucher,
@@ -1374,19 +1379,29 @@ export class VoucherService {
       const totalPages = Math.ceil(total / options.size);
       const hasNext = options.page < totalPages;
       const hasPrevious = options.page > 1;
+      // Buoc 4.6 - MOT lan batch-lookup cho ca trang, TRUOC khi map: ghep
+      // identity vao `assignedUser` (fail-closed 503 - nhanh catch duoi day
+      // nem lai, khong nuot thanh FIND_ALL_VOUCHER_FAILED).
+      const assignedUserIdentityById = await batchLookupSharedUserIdentities(
+        vouchers.map((voucher) => voucher.assignedUser?.sharedUserId),
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
+      vouchers.forEach((voucher) =>
+        this.mergeAssignedUserIdentity(voucher, assignedUserIdentityById),
+      );
       const vouchersDto = this.mapper.mapArray(
         vouchers,
         Voucher,
         VoucherResponseDto,
       );
-      await applyNestedUserIsActive(
+      assignNestedUserIsActive(
         vouchers.map(
           (voucher, index) =>
             [voucher.assignedUser, vouchersDto[index]?.assignedUser] as const,
         ),
-        this.sharedUserServiceClient,
-        this.logger,
-        context,
+        assignedUserIdentityById,
       );
       return {
         hasNext,
@@ -1411,14 +1426,48 @@ export class VoucherService {
 
   async findOne(option: GetVoucherDto) {
     const voucher = await this.getVoucherForFindOne(option);
-    const response = this.mapper.map(voucher, Voucher, VoucherResponseDto);
-    await applyNestedUserIsActive(
-      [[voucher.assignedUser, response.assignedUser]],
+    // Buoc 4.6 - nhu `findAll`: tra identity TRUOC khi map, fail-closed 503.
+    const assignedUserIdentityById = await batchLookupSharedUserIdentities(
+      [voucher.assignedUser?.sharedUserId],
       this.sharedUserServiceClient,
       this.logger,
       `${VoucherService.name}.${this.findOne.name}`,
     );
+    this.mergeAssignedUserIdentity(voucher, assignedUserIdentityById);
+    const response = this.mapper.map(voucher, Voucher, VoucherResponseDto);
+    assignNestedUserIsActive(
+      [[voucher.assignedUser, response.assignedUser]],
+      assignedUserIdentityById,
+    );
     return response;
+  }
+
+  /**
+   * Buoc 4.6 - ghep identity cua shared-user (`FULL_IDENTITY_FIELDS`) vao
+   * `voucher.assignedUser` TRUOC khi map sang `VoucherResponseDto`: dung
+   * khuon `user-group-member.service.ts`. Ghep len ENTITY chu khong len DTO
+   * vi `FULL_IDENTITY_FIELDS` co `image` ma `UserResponseDto` khong khai bao
+   * - automapper chi chep field DTO co, nen shape `assignedUser` giu nguyen
+   * (muc 1.4). `isActive` thi nguoc lai: entity da bo field (buoc 3.4), van
+   * gan tren DTO sau khi map bang `assignNestedUserIsActive`.
+   *
+   * Goi SAU lenh ghi (create/update): entity da luu, gia tri ghep chi nam
+   * trong bo nho, khong bao gio ghi nguoc vao cot cuc bo.
+   *
+   * Khong co identity (sharedUserId treo) => giu gia tri hang cuc bo +
+   * `isActive` false, nhu `GET /user` va `user-group-member` - mot nguoi
+   * treo khong lam hong ca trang danh sach.
+   */
+  private mergeAssignedUserIdentity(
+    voucher: Voucher,
+    identityById: Map<string, SharedUserLookupResponse>,
+  ): void {
+    if (!voucher?.assignedUser) return;
+    mergeSharedUserIdentityInto(
+      voucher.assignedUser,
+      identityById.get(voucher.assignedUser.sharedUserId),
+      FULL_IDENTITY_FIELDS,
+    );
   }
 
   /**
@@ -1430,6 +1479,9 @@ export class VoucherService {
    * review 15/11/2026). He qua: `assignedUser` o route nay KHONG con key
    * `isActive` (entity `User` da bo field, automapper khong chep). Hai giao
    * dien khong doc field nay; ghi o muc "API thay doi".
+   *
+   * Buoc 4.6 giu nguyen ly do do: route nay cung KHONG ghep identity, nen
+   * `assignedUser` o day van la gia tri hang cuc bo.
    */
   async findOnePublic(option: GetVoucherDto) {
     const voucher = await this.getVoucherForFindOne(option);
@@ -1635,6 +1687,7 @@ export class VoucherService {
         );
       },
     );
+    this.mergeAssignedUserIdentity(updatedVoucher, assignedUserIdentityById);
     const response = this.mapper.map(
       updatedVoucher,
       Voucher,

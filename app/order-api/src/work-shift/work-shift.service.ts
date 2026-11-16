@@ -46,6 +46,14 @@ import { CurrentUserDto } from 'src/user/user.dto';
 import { OrderStatus } from 'src/order/order.constants';
 import { RoleEnum } from 'src/role/role.enum';
 import { getRandomString } from 'src/helper';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
+
+/** Mot dong tong hop nhan vien cua ca (gom theo `order.owner`). */
+type ShiftStaffEntry = { user: User; orderCount: number; revenue: number };
 
 @Injectable()
 export class WorkShiftService {
@@ -64,13 +72,68 @@ export class WorkShiftService {
     private readonly logger: Logger,
     @InjectMapper()
     private readonly mapper: Mapper,
+    // Buoc 4.6b - ho ten + SDT cua thu ngan va nhan vien ca lay tu shared-user.
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  private mapToBasicDto(ws: WorkShift): WorkShiftBasicResponseDto {
+  /**
+   * Buoc 4.6b - tra identity cua moi nguoi can hien tren man ca (thu ngan,
+   * nhan vien trong tong hop) bang MOT lan batch-lookup. Fail-closed:
+   * shared-user khong tra loi => 503 `SharedUserUnavailableException`.
+   *
+   * Duong GHI (mo / dong / ep dong ca) goi ham nay TRUOC lenh ghi: shared-user
+   * hong thi 503 khi ca chua doi. Tra SAU khi ghi thi client nhan 503 cho mot
+   * ca DA mo/dong - goi lai la "chi nhanh da co ca" hoac "khong co ca".
+   */
+  private lookupShiftPeople(
+    people: Array<User | null | undefined>,
+    context: string,
+  ): Promise<Map<string, SharedUserLookupResponse>> {
+    return batchLookupSharedUserIdentities(
+      people.map((person) => person?.sharedUserId),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+  }
+
+  /**
+   * Buoc 4.6b - `UserBasicDto` (slug + ho ten + SDT) tu identity cua
+   * shared-user; KHONG doc cot ho ten / SDT cua hang `User` cuc bo.
+   *
+   * Khong co identity (`sharedUserId` treo) => ho ten + SDT de null + mot
+   * dong warn, khong nem: mot nguoi treo khong duoc lam hong ca bao cao ca,
+   * va cung khong roi ve cache cuc bo.
+   */
+  private toUserBasic(
+    person: User,
+    identityById: Map<string, SharedUserLookupResponse>,
+    context: string,
+  ): UserBasicDto {
+    const identity = identityById.get(person.sharedUserId);
+    if (!identity) {
+      this.logger.warn(
+        `No shared-user identity for user ${person.id} (sharedUserId ${person.sharedUserId}): name and phone left empty`,
+        context,
+      );
+    }
+    const u = new UserBasicDto();
+    u.slug = person.slug;
+    u.firstName = identity?.firstName ?? null;
+    u.lastName = identity?.lastName ?? null;
+    u.phonenumber = identity?.phonenumber ?? null;
+    return u;
+  }
+
+  private mapToBasicDto(
+    ws: WorkShift,
+    identityById: Map<string, SharedUserLookupResponse>,
+    context: string,
+  ): WorkShiftBasicResponseDto {
     const dto = new WorkShiftBasicResponseDto();
     dto.slug = ws.slug;
     dto.createdAt = ws.createdAt?.toISOString();
@@ -81,12 +144,7 @@ export class WorkShiftService {
     dto.closingCash = ws.closingCash != null ? Number(ws.closingCash) : null;
     dto.note = ws.note;
     if (ws.cashier) {
-      const u = new UserBasicDto();
-      u.slug = ws.cashier.slug;
-      u.firstName = ws.cashier.firstName;
-      u.lastName = (ws.cashier as any).lastName;
-      u.phonenumber = ws.cashier.phonenumber;
-      dto.cashier = u;
+      dto.cashier = this.toUserBasic(ws.cashier, identityById, context);
     }
     if (ws.branch) {
       dto.branch = { slug: ws.branch.slug, name: ws.branch.name } as any;
@@ -182,6 +240,9 @@ export class WorkShiftService {
       );
     }
 
+    // Buoc 4.6b - tra identity thu ngan TRUOC khi ghi ca.
+    const identityById = await this.lookupShiftPeople([cashier], context);
+
     const workShift = this.workShiftRepository.create({
       slug: getRandomString(),
       cashier,
@@ -200,7 +261,7 @@ export class WorkShiftService {
 
     const totals = await this.computeTotals(saved.id);
     const result = new WorkShiftResponseDto();
-    Object.assign(result, this.mapToBasicDto(saved));
+    Object.assign(result, this.mapToBasicDto(saved, identityById, context));
     result.totalOrders = totals.totalOrders;
     result.totalInvoicesPaid = totals.totalInvoicesPaid;
     result.totalRevenue = totals.totalRevenue;
@@ -226,6 +287,13 @@ export class WorkShiftService {
       throw new WorkShiftException(WorkShiftValidation[WORK_SHIFT_NO_ACTIVE]);
     }
 
+    // Buoc 4.6b - tra identity (thu ngan + nhan vien ca) TRUOC khi dong ca.
+    const staff = await this.collectShiftStaff(workShift.id);
+    const identityById = await this.lookupShiftPeople(
+      [workShift.cashier, ...staff.map((entry) => entry.user)],
+      context,
+    );
+
     workShift.actualEndTime = new Date();
     workShift.status = WorkShiftStatus.CLOSED;
     if (dto.closingCash !== undefined) workShift.closingCash = dto.closingCash;
@@ -234,12 +302,13 @@ export class WorkShiftService {
     const closed = await this.workShiftRepository.save(workShift);
     this.logger.log(`Closed work shift ${closed.slug}`, context);
 
-    return this.buildSummary(closed);
+    return this.buildSummary(closed, staff, identityById, context);
   }
 
   async getCurrentShift(
     currentUser: CurrentUserDto,
   ): Promise<WorkShiftResponseDto> {
+    const context = `${WorkShiftService.name}.${this.getCurrentShift.name}`;
     const workShift = await this.workShiftRepository.findOne({
       where: {
         cashier: { id: currentUser.userId },
@@ -252,9 +321,13 @@ export class WorkShiftService {
       throw new WorkShiftException(WorkShiftValidation[WORK_SHIFT_NO_ACTIVE]);
     }
 
+    const identityById = await this.lookupShiftPeople(
+      [workShift.cashier],
+      context,
+    );
     const totals = await this.computeTotals(workShift.id);
     const result = new WorkShiftResponseDto();
-    Object.assign(result, this.mapToBasicDto(workShift));
+    Object.assign(result, this.mapToBasicDto(workShift, identityById, context));
     result.totalOrders = totals.totalOrders;
     result.totalInvoicesPaid = totals.totalInvoicesPaid;
     result.totalRevenue = totals.totalRevenue;
@@ -297,6 +370,13 @@ export class WorkShiftService {
       throw new WorkShiftException(WorkShiftValidation[WORK_SHIFT_FORBIDDEN]);
     }
 
+    // Buoc 4.6b - nhu closeShift: tra identity TRUOC khi dong ca.
+    const staff = await this.collectShiftStaff(workShift.id);
+    const identityById = await this.lookupShiftPeople(
+      [workShift.cashier, ...staff.map((entry) => entry.user)],
+      context,
+    );
+
     workShift.actualEndTime = new Date();
     workShift.status = WorkShiftStatus.CLOSED;
     workShift.note = dto.note;
@@ -307,12 +387,13 @@ export class WorkShiftService {
       context,
     );
 
-    return this.buildSummary(closed);
+    return this.buildSummary(closed, staff, identityById, context);
   }
 
   async getActiveShifts(
     currentUser: CurrentUserDto,
   ): Promise<WorkShiftResponseDto[]> {
+    const context = `${WorkShiftService.name}.${this.getActiveShifts.name}`;
     const requester = await this.userRepository.findOne({
       where: { id: currentUser.userId },
       relations: ['role', 'branch'],
@@ -330,11 +411,16 @@ export class WorkShiftService {
       order: { actualStartTime: 'DESC' },
     });
 
+    // Buoc 4.6b - mot lan batch-lookup cho moi thu ngan cua danh sach.
+    const identityById = await this.lookupShiftPeople(
+      shifts.map((ws) => ws.cashier),
+      context,
+    );
     const results: WorkShiftResponseDto[] = [];
     for (const ws of shifts) {
       const totals = await this.computeTotals(ws.id);
       const r = new WorkShiftResponseDto();
-      Object.assign(r, this.mapToBasicDto(ws));
+      Object.assign(r, this.mapToBasicDto(ws, identityById, context));
       r.totalOrders = totals.totalOrders;
       r.totalInvoicesPaid = totals.totalInvoicesPaid;
       r.totalRevenue = totals.totalRevenue;
@@ -347,6 +433,7 @@ export class WorkShiftService {
     query: GetWorkShiftsQueryDto,
     currentUser: CurrentUserDto,
   ): Promise<WorkShiftListResponseDto> {
+    const context = `${WorkShiftService.name}.${this.getList.name}`;
     const requester = await this.userRepository.findOne({
       where: { id: currentUser.userId },
       relations: ['role', 'branch'],
@@ -409,11 +496,16 @@ export class WorkShiftService {
 
     const shifts = await qb.getMany();
 
+    // Buoc 4.6b - mot lan batch-lookup cho ca trang.
+    const identityById = await this.lookupShiftPeople(
+      shifts.map((ws) => ws.cashier),
+      context,
+    );
     const data: WorkShiftResponseDto[] = [];
     for (const ws of shifts) {
       const totals = await this.computeTotals(ws.id);
       const r = new WorkShiftResponseDto();
-      Object.assign(r, this.mapToBasicDto(ws));
+      Object.assign(r, this.mapToBasicDto(ws, identityById, context));
       r.totalOrders = totals.totalOrders;
       r.totalInvoicesPaid = totals.totalInvoicesPaid;
       r.totalRevenue = totals.totalRevenue;
@@ -427,10 +519,15 @@ export class WorkShiftService {
     slug: string,
     currentUser: CurrentUserDto,
   ): Promise<WorkShiftResponseDto> {
+    const context = `${WorkShiftService.name}.${this.getBySlug.name}`;
     const workShift = await this.findAndAuthorize(slug, currentUser);
+    const identityById = await this.lookupShiftPeople(
+      [workShift.cashier],
+      context,
+    );
     const totals = await this.computeTotals(workShift.id);
     const result = new WorkShiftResponseDto();
-    Object.assign(result, this.mapToBasicDto(workShift));
+    Object.assign(result, this.mapToBasicDto(workShift, identityById, context));
     result.totalOrders = totals.totalOrders;
     result.totalInvoicesPaid = totals.totalInvoicesPaid;
     result.totalRevenue = totals.totalRevenue;
@@ -465,16 +562,18 @@ export class WorkShiftService {
     slug: string,
     currentUser: CurrentUserDto,
   ): Promise<ShiftStaffSummaryDto[]> {
+    const context = `${WorkShiftService.name}.${this.getStaff.name}`;
     const workShift = await this.findAndAuthorize(slug, currentUser);
-    return this.buildStaffSummary(workShift.id);
+    return this.buildStaffSummary(workShift.id, context);
   }
 
   async getSummary(
     slug: string,
     currentUser: CurrentUserDto,
   ): Promise<WorkShiftSummaryResponseDto> {
+    const context = `${WorkShiftService.name}.${this.getSummary.name}`;
     const workShift = await this.findAndAuthorize(slug, currentUser);
-    return this.buildSummary(workShift);
+    return this.buildSummaryWithLookup(workShift, context);
   }
 
   // Current shift variants (for CASHIER)
@@ -500,15 +599,17 @@ export class WorkShiftService {
   async getCurrentStaff(
     currentUser: CurrentUserDto,
   ): Promise<ShiftStaffSummaryDto[]> {
+    const context = `${WorkShiftService.name}.${this.getCurrentStaff.name}`;
     const ws = await this.getActiveShiftForCashier(currentUser);
-    return this.buildStaffSummary(ws.id);
+    return this.buildStaffSummary(ws.id, context);
   }
 
   async getCurrentSummary(
     currentUser: CurrentUserDto,
   ): Promise<WorkShiftSummaryResponseDto> {
+    const context = `${WorkShiftService.name}.${this.getCurrentSummary.name}`;
     const ws = await this.getActiveShiftForCashier(currentUser);
-    return this.buildSummary(ws);
+    return this.buildSummaryWithLookup(ws, context);
   }
 
   // ---------------------------------------------------------------------------
@@ -608,18 +709,16 @@ export class WorkShiftService {
     return [...directOrders, ...crossOrders, ...unpaidCrossOrders];
   }
 
-  private async buildStaffSummary(
+  /** Gom don cua ca theo `order.owner` - chi doc DB, khong dung identity. */
+  private async collectShiftStaff(
     workShiftId: string,
-  ): Promise<ShiftStaffSummaryDto[]> {
+  ): Promise<ShiftStaffEntry[]> {
     const orders = await this.orderRepository.find({
       where: { workShift: { id: workShiftId } },
       relations: { owner: true },
     });
 
-    const staffMap = new Map<
-      string,
-      { user: User; orderCount: number; revenue: number }
-    >();
+    const staffMap = new Map<string, ShiftStaffEntry>();
 
     for (const order of orders) {
       if (!order.owner) continue;
@@ -641,22 +740,58 @@ export class WorkShiftService {
       }
     }
 
-    return Array.from(staffMap.values()).map((entry) => {
+    return Array.from(staffMap.values());
+  }
+
+  private toStaffSummary(
+    staff: ShiftStaffEntry[],
+    identityById: Map<string, SharedUserLookupResponse>,
+    context: string,
+  ): ShiftStaffSummaryDto[] {
+    return staff.map((entry) => {
       const dto = new ShiftStaffSummaryDto();
-      const u = new UserBasicDto();
-      u.slug = entry.user.slug;
-      u.firstName = entry.user.firstName;
-      u.lastName = (entry.user as any).lastName;
-      u.phonenumber = entry.user.phonenumber;
-      dto.staff = u;
+      dto.staff = this.toUserBasic(entry.user, identityById, context);
       dto.totalOrdersCreated = entry.orderCount;
       dto.totalOrdersRevenue = entry.revenue;
       return dto;
     });
   }
 
+  /** Buoc 4.6b - tong hop nhan vien ca, MOT lan batch-lookup cho ca nhom. */
+  private async buildStaffSummary(
+    workShiftId: string,
+    context: string,
+  ): Promise<ShiftStaffSummaryDto[]> {
+    const staff = await this.collectShiftStaff(workShiftId);
+    const identityById = await this.lookupShiftPeople(
+      staff.map((entry) => entry.user),
+      context,
+    );
+    return this.toStaffSummary(staff, identityById, context);
+  }
+
+  /** Duong DOC: tra identity (thu ngan + nhan vien) roi dung bao cao ca. */
+  private async buildSummaryWithLookup(
+    workShift: WorkShift,
+    context: string,
+  ): Promise<WorkShiftSummaryResponseDto> {
+    const staff = await this.collectShiftStaff(workShift.id);
+    const identityById = await this.lookupShiftPeople(
+      [workShift.cashier, ...staff.map((entry) => entry.user)],
+      context,
+    );
+    return this.buildSummary(workShift, staff, identityById, context);
+  }
+
+  /**
+   * `staff` + `identityById` do noi goi chuan bi: duong ghi (dong ca) phai
+   * tra identity TRUOC lenh ghi (`lookupShiftPeople`).
+   */
   private async buildSummary(
     workShift: WorkShift,
+    staff: ShiftStaffEntry[],
+    identityById: Map<string, SharedUserLookupResponse>,
+    context: string,
   ): Promise<WorkShiftSummaryResponseDto> {
     const invoices = await this.invoiceRepository.find({
       where: { workShift: { id: workShift.id }, status: 'paid' },
@@ -701,7 +836,7 @@ export class WorkShiftService {
     });
     const crossShiftOrdersCount = allOrders.length - directOrders;
 
-    const staffSummary = await this.buildStaffSummary(workShift.id);
+    const staffSummary = this.toStaffSummary(staff, identityById, context);
 
     const closingCash =
       workShift.closingCash != null ? Number(workShift.closingCash) : null;
@@ -712,7 +847,7 @@ export class WorkShiftService {
         : null;
 
     const summary = new WorkShiftSummaryResponseDto();
-    summary.workShift = this.mapToBasicDto(workShift);
+    summary.workShift = this.mapToBasicDto(workShift, identityById, context);
     summary.openingCash = openingCash;
     summary.closingCash = closingCash;
     summary.cashRevenue = cashRevenue;

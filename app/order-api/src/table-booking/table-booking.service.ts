@@ -110,8 +110,12 @@ export class TableBookingService {
     // `batchLookupSharedUserIdentities` fail-closed (nem 503). O day khong
     // duoc phep: ham nay la side-effect chay SAU khi don dat ban da ghi
     // xong, de 503 noi len thi `POST /table-booking` bao loi trong khi ban
-    // ghi van ton tai - nguoi dat lai lan hai thanh hai don. Hong thi rot ve
-    // cache cuc bo + mot dong `warn`.
+    // ghi van ton tai - nguoi dat lai lan hai thanh hai don. Hong thi bo qua
+    // nhan vien (mail chi con toi email cau hinh) + mot dong `warn`.
+    //
+    // Buoc 4.6b: KHONG con roi ve cot `email_column` cuc bo - ca khi
+    // shared-user hong lan khi nhan vien khong co email ben do. Cache cuc bo
+    // la dia chi cu (xem tren); gui toi do la gui nham nguoi.
     let identityById = new Map<string, SharedUserLookupResponse>();
     try {
       identityById = await batchLookupSharedUserIdentities(
@@ -122,7 +126,7 @@ export class TableBookingService {
       );
     } catch (error) {
       this.logger.warn(
-        `Cannot read staff emails from shared-user, falling back to the local cache: ${error?.message}`,
+        `Cannot read staff emails from shared-user, staff recipients skipped: ${error?.message}`,
         context,
       );
     }
@@ -135,10 +139,7 @@ export class TableBookingService {
     const toEmails = Array.from(
       new Set(
         [
-          ...staffs.map(
-            (staff) =>
-              identityById.get(staff.sharedUserId)?.email ?? staff.email,
-          ),
+          ...staffs.map((staff) => identityById.get(staff.sharedUserId)?.email),
           configuredEmail,
         ].filter((email): email is string => !!email),
       ),

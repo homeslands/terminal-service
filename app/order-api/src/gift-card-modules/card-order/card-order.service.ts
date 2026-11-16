@@ -50,7 +50,7 @@ import { FeatureGroupConstant } from '../feature-flag/feature-group.constant';
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
 import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
-import { SharedUserRefService } from 'src/shared/services/shared-user-ref.service';
+import { assertUserKeyLoaded } from 'src/user/user.constant';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
 import { Payment } from 'src/payment/entity/payment.entity';
 import { CashStrategy } from 'src/payment/strategy/cash.strategy';
@@ -97,14 +97,11 @@ export class CardOrderService {
     private readonly gcService: GiftCardService,
     private readonly balanceService: SharedBalanceService,
     private readonly ptService: SharedPointTransactionService,
-    // Buoc 2.12/2.13 — 2C: tep nay CHI cam chuoi slug (`recipientSlug`,
-    // `customerSlug`) chu khong cam ban ghi `user`, vi `findOne` o day nap
-    // `relations: ['receipients', 'giftCards']` - KHONG nap `customer` hay
-    // `receipients.recipient`. Nap chung la viec cua buoc 5.1/5.2, nen o day
-    // dich slug -> sharedUserId bang helper dung o 2.11, DUNG MOT LAN moi
-    // nguoi roi dung cho moi lenh vi/so cai. Khi 5.2 nap quan he thi bo cau
-    // nay va doc `.sharedUserId` thang tu quan he.
-    private readonly sharedUserRefService: SharedUserRefService,
+    // Buoc 5.2 (5-a4) bo `SharedUserRefService` khoi tep nay: moi khoa vi cua
+    // don the / nguoi nhan doc `.sharedUserId` tu quan he da nap (`customer`,
+    // `receipients.recipient`) hoac tu ban ghi `user` vua tra, qua
+    // `assertUserKeyLoaded` - khong con dich tu cot slug. (2.12/2.13 dich slug
+    // vi khi do chua cau nao nap hai quan he nay.)
     private readonly cashStrategy: CashStrategy,
     private readonly paymentUtils: PaymentUtils,
     private readonly sharedCoinPolicyService: SharedCoinPolicyService,
@@ -215,7 +212,9 @@ export class CardOrderService {
       relations: {
         payment: true,
         customer: true,
-        receipients: true,
+        // Buoc 5.2: nap `recipient` de doc khoa vi tu quan he (response khong
+        // doi: `RecipientResponseDto` khong co field `recipient`).
+        receipients: { recipient: true },
       },
     });
     if (!cardOrder)
@@ -234,10 +233,11 @@ export class CardOrderService {
         for (const receipient of cardOrder.receipients) {
           const isMaxBalancePayload: IsMaxBalancePayload = {
             totalPoints: receipient.quantity * cardOrder.cardPoint,
-            // Chi cam slug o day (`receipients` nap ma `receipients.recipient`
-            // thi khong) ⇒ dich qua helper. Bo cau nay o 5.2.
-            sharedUserId: await this.sharedUserRefService.toSharedUserId(
-              receipient.recipientSlug,
+            // Buoc 5.2: khoa doc tu quan he `receipients.recipient` vua nap,
+            // khong dich tu cot slug.
+            sharedUserId: assertUserKeyLoaded(
+              receipient.recipient?.sharedUserId,
+              context,
             ),
           };
           if (
@@ -255,7 +255,13 @@ export class CardOrderService {
           totalPoints: cardOrder.cardPoint * cardOrder.quantity,
           // `customer: true` co trong `relations` o day ⇒ doc thang khoa, khong
           // phai dich. Doc `.sharedUserId` chu KHONG `.slug` (SOT 1, 12/09).
-          sharedUserId: cardOrder?.customer?.sharedUserId,
+          // Buoc 5.2: qua `assertUserKeyLoaded` - khoa rong lot vao thi
+          // `findOneByField` chi bao BALANCE_NOT_FOUND, mat dau vet "quan he
+          // chua nap".
+          sharedUserId: assertUserKeyLoaded(
+            cardOrder.customer?.sharedUserId,
+            context,
+          ),
         };
         if (
           await this.sharedCoinPolicyService.isExceedBalance(
@@ -316,7 +322,9 @@ export class CardOrderService {
       relations: {
         payment: true,
         customer: true,
-        receipients: true,
+        // Buoc 5.2: nap `recipient` de doc khoa vi tu quan he (response khong
+        // doi: `RecipientResponseDto` khong co field `recipient`).
+        receipients: { recipient: true },
       },
     });
     if (!cardOrder)
@@ -335,10 +343,11 @@ export class CardOrderService {
         for (const receipient of cardOrder.receipients) {
           const isMaxBalancePayload: IsMaxBalancePayload = {
             totalPoints: receipient.quantity * cardOrder.cardPoint,
-            // Chi cam slug o day (`receipients` nap ma `receipients.recipient`
-            // thi khong) ⇒ dich qua helper. Bo cau nay o 5.2.
-            sharedUserId: await this.sharedUserRefService.toSharedUserId(
-              receipient.recipientSlug,
+            // Buoc 5.2: khoa doc tu quan he `receipients.recipient` vua nap,
+            // khong dich tu cot slug.
+            sharedUserId: assertUserKeyLoaded(
+              receipient.recipient?.sharedUserId,
+              context,
             ),
           };
           if (
@@ -356,7 +365,13 @@ export class CardOrderService {
           totalPoints: cardOrder.cardPoint * cardOrder.quantity,
           // `customer: true` co trong `relations` o day ⇒ doc thang khoa, khong
           // phai dich. Doc `.sharedUserId` chu KHONG `.slug` (SOT 1, 12/09).
-          sharedUserId: cardOrder?.customer?.sharedUserId,
+          // Buoc 5.2: qua `assertUserKeyLoaded` - khoa rong lot vao thi
+          // `findOneByField` chi bao BALANCE_NOT_FOUND, mat dau vet "quan he
+          // chua nap".
+          sharedUserId: assertUserKeyLoaded(
+            cardOrder.customer?.sharedUserId,
+            context,
+          ),
         };
         if (
           await this.sharedCoinPolicyService.isExceedBalance(
@@ -636,9 +651,11 @@ export class CardOrderService {
 
             const isMaxBalancePayload: IsMaxBalancePayload = {
               totalPoints: createReceipientDto.quantity * card.points,
-              // Chi cam slug tu DTO ⇒ dich qua helper.
-              sharedUserId: await this.sharedUserRefService.toSharedUserId(
-                createReceipientDto.recipientSlug,
+              // Buoc 5.2: da co ban ghi `user` cua nguoi nhan (tra ngay tren)
+              // ⇒ doc thang khoa, khong tra them lan nua theo slug.
+              sharedUserId: assertUserKeyLoaded(
+                receipient.sharedUserId,
+                context,
               ),
             };
             if (
@@ -678,7 +695,7 @@ export class CardOrderService {
         const isMaxBalancePayload: IsMaxBalancePayload = {
           totalPoints: createCardOrderDto.quantity * card.points,
           // Co ban ghi `customer` tai cho ⇒ doc thang `.sharedUserId`.
-          sharedUserId: customer.sharedUserId,
+          sharedUserId: assertUserKeyLoaded(customer.sharedUserId, context),
         };
         if (
           await this.sharedCoinPolicyService.isExceedBalance(
@@ -872,14 +889,36 @@ export class CardOrderService {
   // `handlePaymentCompletion` (listener thanh toan) - nen goi lap / song song
   // la cong lap (BE-16). Cua (3) goi ca khi don `FAIL` ⇒ don thanh toan hong
   // van duoc cong (BE-10).
-  async _generateAndRedeem(databaseEntity: CardOrder) {
+  async _generateAndRedeem(cardOrder: CardOrder) {
     const context = `${CardOrderService.name}.${this._generateAndRedeem.name}`;
     this.logger.log(`handle card payment order success req`, context);
+
+    // Buoc 5.2 (5-a4): CAU NAY la noi duy nhat nap nguoi duoc cong - `customer`
+    // (SELF) va `receipients.recipient` (GIFT). Ba cua chi can truyen don (doc
+    // `slug`), khong cua nao phai nho tu nap hai quan he nay, het chuyen "quen
+    // mot duong ⇒ khoa `undefined`". Doc lai don, KHONG khoa hang: loi cong
+    // trung giu nguyen (BE-16, xem comment tren ham).
+    const databaseEntity = await this.cardOrderRepository.findOne({
+      where: { slug: cardOrder.slug },
+      relations: ['customer', 'receipients', 'receipients.recipient'],
+    });
+    if (!databaseEntity)
+      throw new CardOrderException(CardOrderValidation.CARD_ORDER_NOT_FOUND);
+
+    // Buoc 5.2: kiem du khoa vi cua MOI nguoi duoc cong TRUOC lenh ghi dau tien.
+    // Thieu mot khoa ⇒ nem (400 / 137000), khong ai duoc cong. De toi luc cong
+    // moi phat hien thi don GIFT da cong xong nguoi nhan dau roi moi hong o
+    // nguoi thu hai.
+    if (databaseEntity.type === CardOrderType.SELF)
+      assertUserKeyLoaded(databaseEntity.customer?.sharedUserId, context);
+    if (databaseEntity.type === CardOrderType.GIFT)
+      for (const receipient of databaseEntity.receipients)
+        assertUserKeyLoaded(receipient.recipient?.sharedUserId, context);
 
     switch (databaseEntity.type) {
       case CardOrderType.GIFT:
         for (const item of databaseEntity.receipients) {
-          const { recipientSlug, quantity } = item;
+          const { quantity } = item;
           let totalAmount = 0;
           for (let i = 0; i < quantity; i++) {
             // 1. Gen
@@ -898,9 +937,12 @@ export class CardOrderService {
             totalAmount += databaseEntity.cardPoint;
           }
 
-          // MOT nguon khoa cho ca ba lenh cua nguoi nhan nay.
-          const recipientSharedUserId =
-            await this.sharedUserRefService.toSharedUserId(recipientSlug);
+          // MOT nguon khoa cho ca ba lenh cua nguoi nhan nay - quan he
+          // `receipients.recipient` nap o dau ham (buoc 5.2), khong dich slug.
+          const recipientSharedUserId = assertUserKeyLoaded(
+            item.recipient?.sharedUserId,
+            context,
+          );
 
           // Update recipient balance ONCE after all cards
           await this.balanceService.calcBalance({
@@ -945,11 +987,12 @@ export class CardOrderService {
           totalAmount += databaseEntity.cardPoint;
         }
 
-        // MOT nguon khoa cho ca ba lenh cua chu don.
-        const customerSharedUserId =
-          await this.sharedUserRefService.toSharedUserId(
-            databaseEntity.customerSlug,
-          );
+        // MOT nguon khoa cho ca ba lenh cua chu don - quan he `customer` nap o
+        // dau ham (buoc 5.2), khong dich `customerSlug`.
+        const customerSharedUserId = assertUserKeyLoaded(
+          databaseEntity.customer?.sharedUserId,
+          context,
+        );
 
         //  Update recipient balance ONCE after all cards
         await this.balanceService.calcBalance({

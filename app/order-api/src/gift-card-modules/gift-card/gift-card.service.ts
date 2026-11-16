@@ -112,6 +112,7 @@ export class GiftCardService {
     const sharedUserId = assertUserKeyLoaded(gc.usedBy?.sharedUserId, context);
 
     // Update recipient balance ONCE after all cards
+    // Buoc 5.5: doi dich o 7.7 ⇒ gui kem giftCardIdempotencyKey(<slug the qua>) (`shared/constants/service-ref.constant.ts`).
     await this.balanceService.calcBalance({
       sharedUserId,
       points: gc.cardPoints,

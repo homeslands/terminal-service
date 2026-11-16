@@ -123,6 +123,11 @@ export class AuthService {
     // response (muc 1.4), nhung gia tri lay tu `lookup` ngay duoi. Dat `[]`
     // truoc khi goi de nhanh fail-open khong tra ve `undefined`.
     dto.userRequirements = [];
+    // Buoc 4.7: hai co xac minh khong con cot cuc bo - dat `false` truoc khi
+    // goi de nhanh fail-open (va user khong co identity) van giu du key, kieu
+    // boolean (muc 1.4). Co identity thi ghi de ben duoi.
+    dto.isVerifiedEmail = false;
+    dto.isVerifiedPhonenumber = false;
     try {
       const identity = await this.sharedUserServiceClient.lookupById(
         user.sharedUserId,

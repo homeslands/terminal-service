@@ -23,6 +23,8 @@ import { InitiateCardOrderPaymentAdminDto, InitiateCardOrderPaymentDto } from '.
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { CurrentUser } from 'src/user/user.decorator';
 import { CurrentUserDto } from 'src/user/user.dto';
+import { HasRoles } from 'src/role/roles.decorator';
+import { RoleEnum } from 'src/role/role.enum';
 
 @Controller('card-order')
 @ApiTags('Card Order Resource')
@@ -80,6 +82,19 @@ export class CardOrderController {
   }
 
   @Post('/payment/initiate/admin')
+  // Buoc 5.1 (chot 16/11/2026): moi role tru Customer - dung dieu kien
+  // `useInitiateCardOrderPayment` cua trend-ui/terminal-ui (`role !== CUSTOMER`
+  // goi route nay). Truoc day khong co `@HasRoles` ⇒ khach cung goi duoc, ma
+  // tra tien mat o day la cong xu ngay. `terminal` co them Cashier, Telesale.
+  @HasRoles(
+    RoleEnum.Staff,
+    RoleEnum.Cashier,
+    RoleEnum.Telesale,
+    RoleEnum.Chef,
+    RoleEnum.Manager,
+    RoleEnum.Admin,
+    RoleEnum.SuperAdmin,
+  )
   @ApiOperation({ summary: 'Initiate a card order payment for admin' })
   @ApiResponseWithType({
     status: HttpStatus.OK,
@@ -186,6 +201,9 @@ export class CardOrderController {
   }
 
   @Post(':slug/gift-card/gen')
+  // Buoc 5.1 (chot 16/11/2026): route bam tay cong xu / phat hanh the - chi
+  // quan tri. Hai UI khong co nut nao goi route nay.
+  @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   @ApiOperation({ summary: 'Generate and use gift cards' })
   @ApiResponseWithType({
     status: HttpStatus.OK,

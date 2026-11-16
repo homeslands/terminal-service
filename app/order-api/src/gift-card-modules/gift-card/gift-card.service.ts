@@ -241,6 +241,10 @@ export class GiftCardService {
     });
     if (!user) throw new AuthException(AuthValidation.USER_NOT_FOUND);
 
+    // GIU NGUYEN LOI GOC - BE-7 (`progress/loi-co-tu-truoc.md`, nguoi dung chot
+    // 17/11/2026, sua gop sau giai doan 10): doc the -> kiem `status` ->
+    // `save(USED)` khong khoa hang, `use()` cong xu sau khi ham nay tra ve ⇒
+    // hai request cung mot the cung luc cung qua phep kiem roi cung duoc cong.
     const gc = await this.gcRepository.findOne({
       where: {
         code: payload.code,

@@ -65,7 +65,7 @@ import { UserGroupException } from 'src/user-group/user-group.exception';
 import { UserGroupValidation } from 'src/user-group/user-group.validation';
 import { User } from 'src/user/user.entity';
 import {
-  assignNestedUserIsActive,
+  assignNestedUserFlags,
   batchLookupSharedUserIdentities,
   FULL_IDENTITY_FIELDS,
   mergeSharedUserIdentityInto,
@@ -398,7 +398,7 @@ export class VoucherService {
       Voucher,
       VoucherResponseDto,
     );
-    assignNestedUserIsActive(
+    assignNestedUserFlags(
       [[createdVoucher.assignedUser, response.assignedUser]],
       assignedUserIdentityById,
     );
@@ -1396,7 +1396,7 @@ export class VoucherService {
         Voucher,
         VoucherResponseDto,
       );
-      assignNestedUserIsActive(
+      assignNestedUserFlags(
         vouchers.map(
           (voucher, index) =>
             [voucher.assignedUser, vouchersDto[index]?.assignedUser] as const,
@@ -1435,7 +1435,7 @@ export class VoucherService {
     );
     this.mergeAssignedUserIdentity(voucher, assignedUserIdentityById);
     const response = this.mapper.map(voucher, Voucher, VoucherResponseDto);
-    assignNestedUserIsActive(
+    assignNestedUserFlags(
       [[voucher.assignedUser, response.assignedUser]],
       assignedUserIdentityById,
     );
@@ -1448,14 +1448,15 @@ export class VoucherService {
    * khuon `user-group-member.service.ts`. Ghep len ENTITY chu khong len DTO
    * vi `FULL_IDENTITY_FIELDS` co `image` ma `UserResponseDto` khong khai bao
    * - automapper chi chep field DTO co, nen shape `assignedUser` giu nguyen
-   * (muc 1.4). `isActive` thi nguoc lai: entity da bo field (buoc 3.4), van
-   * gan tren DTO sau khi map bang `assignNestedUserIsActive`.
+   * (muc 1.4). `isActive` (buoc 3.4) va hai co xac minh (buoc 4.7) thi nguoc
+   * lai: entity da bo field, automapper khong chep, nen gan tren DTO sau khi
+   * map bang `assignNestedUserFlags`.
    *
    * Goi SAU lenh ghi (create/update): entity da luu, gia tri ghep chi nam
    * trong bo nho, khong bao gio ghi nguoc vao cot cuc bo.
    *
-   * Khong co identity (sharedUserId treo) => giu gia tri hang cuc bo +
-   * `isActive` false, nhu `GET /user` va `user-group-member` - mot nguoi
+   * Khong co identity (sharedUserId treo) => giu ho ten/SDT/email/dia chi cua
+   * hang cuc bo + ca ba co trang thai `false`, nhu `GET /user` va `user-group-member` - mot nguoi
    * treo khong lam hong ca trang danh sach.
    */
   private mergeAssignedUserIdentity(
@@ -1482,6 +1483,10 @@ export class VoucherService {
    *
    * Buoc 4.6 giu nguyen ly do do: route nay cung KHONG ghep identity, nen
    * `assignedUser` o day van la gia tri hang cuc bo.
+   *
+   * Buoc 4.7: cung ly do, `assignedUser` o route nay mat them hai key co xac
+   * minh (entity bo field). Hai giao dien chi doc hai co o hop chi tiet voucher,
+   * qua route CO dang nhap `GET /voucher/specific`.
    */
   async findOnePublic(option: GetVoucherDto) {
     const voucher = await this.getVoucherForFindOne(option);
@@ -1693,7 +1698,7 @@ export class VoucherService {
       Voucher,
       VoucherResponseDto,
     );
-    assignNestedUserIsActive(
+    assignNestedUserFlags(
       [[updatedVoucher.assignedUser, response.assignedUser]],
       assignedUserIdentityById,
     );

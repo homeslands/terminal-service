@@ -112,13 +112,11 @@ export class User extends Base {
   @AutoMap(() => Role)
   role: Role;
 
-  @Column({ name: 'is_verified_email_column', default: false })
-  @AutoMap()
-  isVerifiedEmail: boolean;
-
-  @Column({ name: 'is_verified_phonenumber_column', default: false })
-  @AutoMap()
-  isVerifiedPhonenumber: boolean;
+  // Buoc 4.7: hai co xac minh (email, SDT) da roi entity. Gia tri that nam o
+  // `shared-user`; DTO van khai hai field va gan tu identity (`user.helper.ts`,
+  // `UserService.mergeSharedUserIdentity`, `AuthService.getProfile`). Hai cot
+  // cuc bo doi ten `_deprecated_*`, xoa that o giai doan 10; script
+  // backfill doc chung qua `user-legacy-column.helper.ts` (SQL tho, do ten cot).
 
   @OneToMany(() => CardOrder, (cardOrder) => cardOrder.customer, {
     onDelete: 'SET NULL',

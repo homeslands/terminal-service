@@ -135,6 +135,11 @@ export class UserService {
     // xac thuc duoc (JwtStrategy tra theo sharedUserId roi chan neu khong
     // thay), nen "khong dung duoc" mo ta dung trang thai cua no.
     dto.isActive = identity?.isActive ?? false;
+    // Buoc 4.7: hai co xac minh cung gan LUON, nhu `isActive`. Entity da bo hai
+    // field nen `dto` khong con gia tri cuc bo nao de rot ve - bo trong la key
+    // bien mat khoi response (muc 1.4). Khong co identity => `false`.
+    dto.isVerifiedEmail = identity?.isVerifiedEmail ?? false;
+    dto.isVerifiedPhonenumber = identity?.isVerifiedPhonenumber ?? false;
     // ⚠ KHONG gan `userRequirements` o day. Ham nay la diem merge dung chung
     // cua nhieu route, ma truoc buoc 2.5 chi `GET /user` (danh sach) nap quan
     // he requirement - cac route kia KHONG co field do. Gan o day la them
@@ -148,9 +153,6 @@ export class UserService {
       dob: identity.dob ?? dto.dob,
       email: identity.email ?? dto.email,
       address: identity.address ?? dto.address,
-      isVerifiedEmail: identity.isVerifiedEmail ?? dto.isVerifiedEmail,
-      isVerifiedPhonenumber:
-        identity.isVerifiedPhonenumber ?? dto.isVerifiedPhonenumber,
     });
   }
 
@@ -1473,9 +1475,9 @@ export class UserService {
       email: identity.email ?? dto.email,
       address: identity.address ?? dto.address,
       image: identity.image ?? dto.image,
-      isVerifiedEmail: identity.isVerifiedEmail ?? dto.isVerifiedEmail,
-      isVerifiedPhonenumber:
-        identity.isVerifiedPhonenumber ?? dto.isVerifiedPhonenumber,
+      // Buoc 4.7: entity khong con hai co nen khong rot ve `dto` (undefined).
+      isVerifiedEmail: identity.isVerifiedEmail ?? false,
+      isVerifiedPhonenumber: identity.isVerifiedPhonenumber ?? false,
       language: identity.language ?? dto.language,
     });
     return dto;

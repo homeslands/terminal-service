@@ -40,8 +40,8 @@ import { CoinPolicyException } from '../coin-policy/coin-policy.exception';
 import { CoinPolicyValidation } from '../coin-policy/coin-policy.validation';
 import { assertUserKeyLoaded } from 'src/user/user.constant';
 import {
-  applyNestedUserIsActive,
-  assignNestedUserIsActive,
+  applyNestedUserFlags,
+  assignNestedUserFlags,
   batchLookupSharedUserIdentities,
 } from 'src/user/user.helper';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
@@ -73,7 +73,7 @@ export class GiftCardService {
     // private readonly ptService: PointTransactionService,
     private readonly balanceService: SharedBalanceService,
     private readonly ptService: SharedPointTransactionService,
-    // Buoc 3.4 - `usedBy.isActive` lay tu shared-user (applyNestedUserIsActive).
+    // Buoc 3.4 - `usedBy.isActive` lay tu shared-user (applyNestedUserFlags).
     private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) { }
 
@@ -134,7 +134,7 @@ export class GiftCardService {
 
 
     const response = this.mapper.map(gc, GiftCard, GiftCardResponseDto);
-    assignNestedUserIsActive(
+    assignNestedUserFlags(
       [[gc.usedBy, response.usedBy]],
       recipientIdentityById,
     );
@@ -200,7 +200,7 @@ export class GiftCardService {
       GiftCard,
       GiftCardResponseDto,
     );
-    await applyNestedUserIsActive(
+    await applyNestedUserFlags(
       gcs.map((gc, index) => [gc.usedBy, gcsResponse[index]?.usedBy] as const),
       this.sharedUserServiceClient,
       this.logger,

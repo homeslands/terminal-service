@@ -12,6 +12,7 @@ import { DbModule } from 'src/db/db.module';
 import { InvoiceListener } from './invoice.listener';
 import { PrinterModule } from 'src/printer/printer.module';
 import { PrinterConnectorModule } from 'src/printer-connector/printer-connector.module';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { Printer } from 'src/printer/entity/printer.entity';
 import { WorkShift } from 'src/work-shift/work-shift.entity';
 @Module({
@@ -22,6 +23,8 @@ import { WorkShift } from 'src/work-shift/work-shift.entity';
     DbModule,
     PrinterModule,
     PrinterConnectorModule,
+    // InvoiceService lay ten nguoi mua + thu ngan tu shared-user (buoc 4.5).
+    SharedUserServiceModule,
   ],
   controllers: [InvoiceController],
   providers: [

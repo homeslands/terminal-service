@@ -74,6 +74,20 @@ import { CurrencyUtil } from 'src/shared/utils/currency.util';
 import moment from 'moment';
 import { SharedExportFileService } from 'src/shared/services/shared-export-file.service';
 import { CardOrderStatusMapper } from './card-order.constants';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
+
+// Buoc 5.3 (5-a): ten chep vao cot snapshot lay tu identity cua shared-user.
+// Bo phan rong thay vi ghi "null null" nhu khi ghep thang hai cot cuc bo (cache
+// ten cuc bo rong o phan lon user - do 16/11/2026).
+const fullNameOf = (identity: SharedUserLookupResponse): string =>
+  [identity.firstName, identity.lastName].filter(Boolean).join(' ');
+
+/** Ten + SDT chep vao cot snapshot cua don the / nguoi nhan (buoc 5.3). */
+type IdentitySnapshot = { name: string; phone: string };
 
 @Injectable()
 export class CardOrderService {
@@ -108,7 +122,56 @@ export class CardOrderService {
     private readonly sharedExportFileService: SharedExportFileService,
     private readonly notificationUtils: NotificationUtils,
     private readonly userActiveChecker: UserActiveChecker,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) { }
+
+  /**
+   * Buoc 5.3 (5-a) - nguon cua cac cot snapshot ten/SDT (`customerName`,
+   * `customerPhone`, `cashierName`, `cashierPhone`, `cancelByName`; `name`,
+   * `phone`, `senderName`, `senderPhone` cua nguoi nhan): identity cua
+   * shared-user, KHONG phai hang `user_tbl` cuc bo - cache ten cuc bo rong o
+   * phan lon user (ghi ra "null null"), phan con lai co the da lech.
+   *
+   * - MOT luot `lookupByIds` (qua `batchLookupSharedUserIdentities`) cho moi
+   *   nguoi cua mot thao tac, goi TRUOC lenh ghi dau tien.
+   * - Fail-closed: shared-user khong tra loi ⇒ 503
+   *   (`SharedUserUnavailableException`, ma 162001); mot nguoi khong co
+   *   identity ⇒ loi "not found" cua vai do (`notFound`). Khong bao gio chep
+   *   tu cot cuc bo "cho xong".
+   * - Chep xong thi thoi: doc don cu KHONG ghep lai - khach doi ten hom nay
+   *   khong lam doi ten da in tren the phat hanh truoc do.
+   * - `xId`, `xSlug`, quan he `x` giu nguyen - khoa cua trend.
+   */
+  private async lookupSnapshotIdentities(
+    people: Array<User | null | undefined>,
+    context: string,
+  ): Promise<Map<string, SharedUserLookupResponse>> {
+    return await batchLookupSharedUserIdentities(
+      people.map((person) => person?.sharedUserId),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+  }
+
+  private snapshotOf(
+    identityById: Map<string, SharedUserLookupResponse>,
+    person: User,
+    notFound: () => Error,
+    context: string,
+  ): IdentitySnapshot {
+    const identity = person.sharedUserId
+      ? identityById.get(person.sharedUserId)
+      : undefined;
+    if (!identity) {
+      this.logger.warn(
+        `No shared-user identity for local user ${person.id} (sharedUserId ${person.sharedUserId}): card order snapshot not written`,
+        context,
+      );
+      throw notFound();
+    }
+    return { name: fullNameOf(identity), phone: identity.phonenumber };
+  }
 
   private buildExcelConfig() {
     const excelConfig = new ExcelConfig();
@@ -396,6 +459,15 @@ export class CardOrderService {
     )
       return this.mapper.map(cardOrder, CardOrder, CardOrderResponseDto);
 
+    // Buoc 5.3: identity thu ngan cho snapshot - tra TRUOC lenh ghi dau tien
+    // (huy payment cu) de shared-user hong thi 503 ma khong ghi gi.
+    const cashierSnapshot = this.snapshotOf(
+      await this.lookupSnapshotIdentities([cashier], context),
+      cashier,
+      () => new CardOrderException(CardOrderValidation.CASHIER_NOT_FOUND),
+      context,
+    );
+
     // Handle cancel payment before using other payment method
     const prevPayment = cardOrder.payment;
     if (prevPayment) {
@@ -449,8 +521,8 @@ export class CardOrderService {
       paymentStatus: payment.statusCode,
       cashier: cashier,
       cashierId: cashier.id,
-      cashierName: `${cashier.firstName} ${cashier.lastName}`,
-      cashierPhone: cashier.phonenumber,
+      cashierName: cashierSnapshot.name,
+      cashierPhone: cashierSnapshot.phone,
       cashierSlug: cashier.slug,
     } as Partial<CardOrder>);
 
@@ -512,6 +584,15 @@ export class CardOrderService {
       throw new CardOrderException(CardOrderValidation.CARD_ORDER_NOT_PENDING);
     }
 
+    // Buoc 5.3: ten nguoi huy cho snapshot - tra TRUOC khi huy payment.
+    const cancelerSnapshot = this.snapshotOf(
+      await this.lookupSnapshotIdentities([canceler], context),
+      canceler,
+      () =>
+        new UserException(UserValidation.USER_NOT_FOUND, 'Canceler not found'),
+      context,
+    );
+
     if (cardOrder.payment)
       await this.paymentUtils.cancelPayment(cardOrder.payment?.slug);
 
@@ -519,7 +600,7 @@ export class CardOrderService {
       status: CardOrderStatus.CANCELLED,
       paymentStatus: PaymentStatus.CANCELLED,
       cancelBySlug: canceler.slug,
-      cancelByName: `${canceler.firstName} ${canceler.lastName}`,
+      cancelByName: cancelerSnapshot.name,
       cancelAt: new Date(),
     } as CardOrder);
 
@@ -631,11 +712,13 @@ export class CardOrderService {
       );
     }
 
-    let receipients: Recipient[] = [];
+    // Buoc 5.3: vong nay chi tim + kiem tran tung nguoi nhan; ban ghi
+    // `Recipient` dung SAU khi tra identity MOT luot cho ca lo (ben duoi).
+    let recipientUsers: User[] = [];
 
     switch (createCardOrderDto.cardOrderType) {
       case CardOrderType.GIFT:
-        receipients = await Promise.all(
+        recipientUsers = await Promise.all(
           createCardOrderDto.receipients.map(async (createReceipientDto) => {
             const receipient = await this.userRepository.findOne({
               where: {
@@ -667,27 +750,7 @@ export class CardOrderService {
                 CoinPolicyValidation.EXCEED_MAXIMUM_BALANCE,
               );
 
-            const receipientItem = this.mapper.map(
-              createReceipientDto,
-              CreateRecipientDto,
-              Recipient,
-            );
-
-            Object.assign(receipientItem, {
-              name: `${receipient.firstName} ${receipient.lastName}`,
-              phone: receipient.phonenumber,
-              recipientId: receipient.id,
-              recipientSlug: receipient.slug,
-              recipient: receipient,
-
-              senderId: customer.id,
-              senderSlug: customer.slug,
-              senderName: `${customer.firstName} ${customer.lastName}`,
-              senderPhone: customer.phonenumber,
-              sender: customer,
-            } as Partial<Recipient>);
-
-            return receipientItem;
+            return receipient;
           }),
         );
         break;
@@ -707,6 +770,64 @@ export class CardOrderService {
           );
         break;
     }
+
+    // Buoc 5.3 (5-a): MOT luot tra identity cho chu don, thu ngan va moi
+    // nguoi nhan, TRUOC lenh ghi dau tien. Fail-closed - xem
+    // `lookupSnapshotIdentities`.
+    const identityById = await this.lookupSnapshotIdentities(
+      [customer, cashier, ...recipientUsers],
+      context,
+    );
+    const customerSnapshot = this.snapshotOf(
+      identityById,
+      customer,
+      () =>
+        new CardOrderException(
+          CardOrderValidation.CARD_ORDER_CUSTOMER_NOT_FOUND,
+        ),
+      context,
+    );
+    const cashierSnapshot = cashier
+      ? this.snapshotOf(
+          identityById,
+          cashier,
+          () => new CardOrderException(CardOrderValidation.CASHIER_NOT_FOUND),
+          context,
+        )
+      : null;
+
+    const receipients: Recipient[] = recipientUsers.map((receipient, index) => {
+      const recipientSnapshot = this.snapshotOf(
+        identityById,
+        receipient,
+        () =>
+          new CardOrderException(
+            CardOrderValidation.CARD_ORDER_RECIPIENT_NOT_FOUND,
+          ),
+        context,
+      );
+      const receipientItem = this.mapper.map(
+        createCardOrderDto.receipients[index],
+        CreateRecipientDto,
+        Recipient,
+      );
+
+      Object.assign(receipientItem, {
+        name: recipientSnapshot.name,
+        phone: recipientSnapshot.phone,
+        recipientId: receipient.id,
+        recipientSlug: receipient.slug,
+        recipient: receipient,
+
+        senderId: customer.id,
+        senderSlug: customer.slug,
+        senderName: customerSnapshot.name,
+        senderPhone: customerSnapshot.phone,
+        sender: customer,
+      } as Partial<Recipient>);
+
+      return receipientItem;
+    });
 
     const cardOrder = this.mapper.map(
       createCardOrderDto,
@@ -730,14 +851,14 @@ export class CardOrderService {
 
       customerId: customer.id,
       customerSlug: customer.slug,
-      customerName: `${customer.firstName} ${customer.lastName}`,
-      customerPhone: customer.phonenumber,
+      customerName: customerSnapshot.name,
+      customerPhone: customerSnapshot.phone,
       customer,
 
       cashierId: cashier ? cashier.id : null,
       cashierSlug: cashier ? cashier.slug : null,
-      cashierName: cashier ? `${cashier.firstName} ${cashier.lastName}` : null,
-      cashierPhone: cashier ? cashier.phonenumber : null,
+      cashierName: cashierSnapshot ? cashierSnapshot.name : null,
+      cashierPhone: cashierSnapshot ? cashierSnapshot.phone : null,
       cashier: cashier ? cashier : null,
     } as Partial<CardOrder>);
 

@@ -24,7 +24,42 @@ import {
   FeatureSystemGroups,
 } from 'src/feature-flag-system/feature-flag-system.constant';
 import { FeatureFlagSystemService } from 'src/feature-flag-system/feature-flag-system.service';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
 
+type IdentityMap = Map<string, SharedUserLookupResponse>;
+
+// Ten hien thi tu identity cua shared-user. Bo phan rong thay vi in
+// "null"/"undefined" nhu khi ghep thang hai cot cuc bo.
+const fullNameOf = (identity: SharedUserLookupResponse): string =>
+  [identity.firstName, identity.lastName].filter(Boolean).join(' ');
+
+/**
+ * Buoc 4.3 - ho ten va ngon ngu cua nhan vien nhan canh bao "in loi" lay tu
+ * shared-user (nguon that), KHONG doc `firstName`/`lastName`/`language` tren
+ * hang `user_tbl` cuc bo. Moi ham tra MOT luot `batch-lookup` cho ca nhom.
+ *
+ * Cac ham o day KHONG dung noi dung phieu in: chung tao canh bao cho nhan vien
+ * SAU KHI lenh in da hong (printer job da ghi FAILED). Ten duy nhat in len
+ * chung tu la o hoa don - buoc 4.5 (`invoice.service.ts`).
+ *
+ * Chinh sach loi - fail-closed theo nghia KHONG phat canh bao thieu ten
+ * (progress/trend-api.md 4-c):
+ *   - Nguoi khong tra duoc => bo qua nguoi do + `warn`.
+ *   - shared-user khong tra loi => KHONG phat canh bao nao, ghi MOT dong loi
+ *     neu ro printer job, KHONG nem ra. Nem ra o day hai luong in: o
+ *     `printer-legacy.worker.ts` loi bay khoi vong `while` thi bo qua
+ *     `lockLabelTicket.release()` (khoa may in toi het TTL), va o nhanh "lock
+ *     het han" (trong `try`) thi roi vao `catch` cua lan in => in LAI; o
+ *     `printer.consumer.ts` thi lam hong `handleFinalFailure` sau khi job da
+ *     ghi FAILED. Trang thai FAILED cua printer job van con de tra cuu.
+ *
+ * Khong phai identity, giu nguyen: `receiverId` (id CUC BO - khop
+ * `existedPrinterEvent`), `language` cua ban ghi su kien (snapshot luc gui).
+ */
 @Injectable()
 export class PrinterEventUtils {
   constructor(
@@ -40,7 +75,54 @@ export class PrinterEventUtils {
     @InjectRepository(PrinterEvent)
     private readonly printerEventRepository: Repository<PrinterEvent>,
     private readonly featureFlagSystemService: FeatureFlagSystemService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
+
+  /**
+   * Mot luot `batch-lookup` cho ca nhom nhan vien nhan canh bao. shared-user
+   * khong tra loi => `null`: ben goi khong phat canh bao nao (mot dong loi o
+   * day, khong canh bao tung nguoi), khong nem ra.
+   */
+  private async lookupStaffIdentities(
+    staffs: User[],
+    printerJobId: string,
+    context: string,
+  ): Promise<IdentityMap | null> {
+    try {
+      return await batchLookupSharedUserIdentities(
+        staffs.map((staff) => staff.sharedUserId),
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
+    } catch {
+      // Nguyen nhan goc da duoc batchLookupSharedUserIdentities ghi log.
+      this.logger.error(
+        `Skip failed-printing events of printer job ${printerJobId} for ${staffs.length} staff: shared-user identities unavailable, no event is sent without a name`,
+        context,
+      );
+      return null;
+    }
+  }
+
+  /** Cap (hang cuc bo, identity) cho nhung nguoi tra duoc - bo qua phan con lai. */
+  private withIdentities(
+    staffs: User[],
+    identities: IdentityMap,
+    context: string,
+  ): Array<[User, SharedUserLookupResponse]> {
+    return staffs.flatMap((staff): Array<[User, SharedUserLookupResponse]> => {
+      const identity = identities.get(staff.sharedUserId);
+      if (!identity) {
+        this.logger.warn(
+          `Skip printer event for user ${staff.id}: no shared-user identity for sharedUserId ${staff.sharedUserId}`,
+          context,
+        );
+        return [];
+      }
+      return [[staff, identity]];
+    });
+  }
 
   /**
    * Get the frontend URL
@@ -65,6 +147,7 @@ export class PrinterEventUtils {
     order: Order,
     printerJobId: string,
   ) {
+    const context = `${PrinterEventUtils.name}.${this.sendPrinterEventForAllBranchStaffsWhenFailedBillPrinting.name}`;
     const isLockedFeature = await this.featureFlagSystemService.isLockedFeature(
       FeatureSystemGroups.PRINTER,
       FeatureFlagSystems.PRINTER.EVENT_FAILED_PRINTING.key,
@@ -91,13 +174,24 @@ export class PrinterEventUtils {
       },
     });
 
+    const identities = await this.lookupStaffIdentities(
+      staffs,
+      printerJob.id,
+      context,
+    );
+    if (!identities) return;
+
     const frontEndUrl = await this.getFrontendUrl();
 
-    const printerEventData = staffs.map((staff) => {
+    const printerEventData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.printerEventLanguageService.format(
         PrinterEventMessageCode.INVOICE_FAILED_PRINTING,
         { referenceNumber: order.referenceNumber.toString() },
-        staff.language as string,
+        identity.language,
       );
 
       let existedPrinterEvent = null;
@@ -112,10 +206,10 @@ export class PrinterEventUtils {
         message: PrinterEventMessageCode.INVOICE_FAILED_PRINTING,
         receiverId: staff.id,
         type: PrinterEventType.INVOICE,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/order-management?order=${order.slug}`,
         existedPrinterEvent,
         printerJobId: printerJob.id,
@@ -140,6 +234,7 @@ export class PrinterEventUtils {
     order: Order,
     printerJobId: string,
   ) {
+    const context = `${PrinterEventUtils.name}.${this.sendPrinterEventForAllBranchStaffsWhenFailedChefOrderPrinting.name}`;
     const isLockedFeature = await this.featureFlagSystemService.isLockedFeature(
       FeatureSystemGroups.PRINTER,
       FeatureFlagSystems.PRINTER.EVENT_FAILED_PRINTING.key,
@@ -166,13 +261,24 @@ export class PrinterEventUtils {
       },
     });
 
+    const identities = await this.lookupStaffIdentities(
+      staffs,
+      printerJob.id,
+      context,
+    );
+    if (!identities) return;
+
     const frontEndUrl = await this.getFrontendUrl();
 
-    const printerEventData = staffs.map((staff) => {
+    const printerEventData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.printerEventLanguageService.format(
         PrinterEventMessageCode.CHEF_ORDER_FAILED_PRINTING,
         { referenceNumber: order.referenceNumber.toString() },
-        staff.language as string,
+        identity.language,
       );
 
       let existedPrinterEvent = null;
@@ -187,10 +293,10 @@ export class PrinterEventUtils {
         message: PrinterEventMessageCode.CHEF_ORDER_FAILED_PRINTING,
         receiverId: staff.id,
         type: PrinterEventType.CHEF_ORDER,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/chef-order`,
         existedPrinterEvent,
         printerJobId: printerJob.id,
@@ -216,6 +322,7 @@ export class PrinterEventUtils {
     order: Order,
     printerJobId: string,
   ) {
+    const context = `${PrinterEventUtils.name}.${this.sendPrinterEventForAllBranchStaffsWhenFailedLabelTicketPrinting.name}`;
     const isLockedFeature = await this.featureFlagSystemService.isLockedFeature(
       FeatureSystemGroups.PRINTER,
       FeatureFlagSystems.PRINTER.EVENT_FAILED_PRINTING.key,
@@ -242,13 +349,24 @@ export class PrinterEventUtils {
       },
     });
 
+    const identities = await this.lookupStaffIdentities(
+      staffs,
+      printerJob.id,
+      context,
+    );
+    if (!identities) return;
+
     const frontEndUrl = await this.getFrontendUrl();
 
-    const printerEventData = staffs.map((staff) => {
+    const printerEventData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.printerEventLanguageService.format(
         PrinterEventMessageCode.LABEL_TICKET_FAILED_PRINTING,
         { referenceNumber: order.referenceNumber.toString() },
-        staff.language as string,
+        identity.language,
       );
 
       let existedPrinterEvent = null;
@@ -263,10 +381,10 @@ export class PrinterEventUtils {
         message: PrinterEventMessageCode.LABEL_TICKET_FAILED_PRINTING,
         receiverId: staff.id,
         type: PrinterEventType.LABEL_TICKET,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/chef-order`,
         existedPrinterEvent,
         printerJobId: printerJob.id,

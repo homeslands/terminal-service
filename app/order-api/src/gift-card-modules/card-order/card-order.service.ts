@@ -844,6 +844,12 @@ export class CardOrderService {
   }
 
   async generateAndRedeem(slug: string) {
+    // Cua (1) - `POST :slug/gift-card/gen` (admin bam tay). GIU NGUYEN LOI GOC
+    // - BE-16 (`progress/loi-co-tu-truoc.md`), sua gop sau giai doan 10 (nguoi
+    // dung chot 17/11/2026; buoc 5.1 chi gac role o controller). Phep kiem
+    // `COMPLETED && _.isEmpty(co.giftCards)` luon dung o nhanh GIFT/SELF (hai
+    // nhanh nay khong bao gio dien `giftCards`), lai khong khoa hang ⇒ bam bao
+    // nhieu lan thi cong xu bay nhieu lan. Chi nhanh BUY bi chan.
     const co = await this.cardOrderRepository.findOne({
       where: { slug },
       relations: ['receipients', 'giftCards'],
@@ -859,6 +865,13 @@ export class CardOrderService {
       );
   }
 
+  // GIU NGUYEN LOI GOC (nguoi dung chot 17/11/2026 - buoc 5.1 chi gac role; sua
+  // gop sau giai doan 10, `progress/loi-co-tu-truoc.md`): ham nay khong kiem
+  // "don da cong chua" va khong khoa hang. Ba cua goi thang - (1)
+  // `generateAndRedeem`, (2) `initiatePaymentAdmin` (tien mat), (3)
+  // `handlePaymentCompletion` (listener thanh toan) - nen goi lap / song song
+  // la cong lap (BE-16). Cua (3) goi ca khi don `FAIL` ⇒ don thanh toan hong
+  // van duoc cong (BE-10).
   async _generateAndRedeem(databaseEntity: CardOrder) {
     const context = `${CardOrderService.name}.${this._generateAndRedeem.name}`;
     this.logger.log(`handle card payment order success req`, context);

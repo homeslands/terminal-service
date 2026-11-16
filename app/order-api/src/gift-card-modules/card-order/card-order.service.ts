@@ -1066,6 +1066,7 @@ export class CardOrderService {
           );
 
           // Update recipient balance ONCE after all cards
+          // Buoc 5.5: doi dich o 7.7 ⇒ gui kem cardOrderIdempotencyKey(<slug don>, <sharedUserId NGUOI NHAN nay>) - Z-2: moi nguoi nhan mot khoa (`shared/constants/service-ref.constant.ts`).
           await this.balanceService.calcBalance({
             sharedUserId: recipientSharedUserId,
             points: totalAmount,
@@ -1116,6 +1117,7 @@ export class CardOrderService {
         );
 
         //  Update recipient balance ONCE after all cards
+        // Buoc 5.5: doi dich o 7.7 ⇒ gui kem cardOrderIdempotencyKey(<slug don>, <sharedUserId chu don>) (`shared/constants/service-ref.constant.ts`).
         await this.balanceService.calcBalance({
           sharedUserId: customerSharedUserId,
           points: totalAmount,

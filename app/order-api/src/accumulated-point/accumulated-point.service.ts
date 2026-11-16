@@ -251,6 +251,7 @@ export class AccumulatedPointService {
   /**
    * Add points for user after successful payment
    */
+  // Buoc 5.5: doi dich o 7.7 ⇒ gui kem orderOpIdempotencyKey(<slug don>, 'add') (`shared/constants/service-ref.constant.ts`).
   async addPointsForOrder(addPointsDto: IAddPointsDto): Promise<void> {
     const context = `${AccumulatedPointService.name}.${this.addPointsForOrder.name}`;
 
@@ -410,6 +411,7 @@ export class AccumulatedPointService {
    * Hai ham con lai (`confirmPointsUsage`, `handleCancelReservation`) van nhan
    * **tham chieu** vi chung duoc goi tu NGOAI module (job, order, order-item).
    */
+  // Buoc 5.5: doi dich o 7.7 ⇒ gui kem orderOpIdempotencyKey(<slug don>, 'reserve', <lan giu thu may cua don>) - mot don giu diem duoc nhieu lan (`shared/constants/service-ref.constant.ts`).
   async reservePointsForOrder(
     orderSlug: string,
     pointsToUse: number,
@@ -596,6 +598,7 @@ export class AccumulatedPointService {
   /**
    * Confirm points usage when order is paid successfully
    */
+  // Buoc 5.5: doi dich o 7.7 ⇒ gui kem orderOpIdempotencyKey(<slug don>, 'confirm') (`shared/constants/service-ref.constant.ts`).
   async confirmPointsUsage(ref: string): Promise<void> {
     const context = `${AccumulatedPointService.name}.${this.confirmPointsUsage.name}`;
 
@@ -698,6 +701,7 @@ export class AccumulatedPointService {
    * Automatically handle when order is cancelled or expired
    * Cancel reservation if exists, refund points if confirmed
    */
+  // Buoc 5.5: doi dich o 7.7 ⇒ gui kem orderOpIdempotencyKey(<slug don>, 'cancel', <so cua lan giu bi huy>) (`shared/constants/service-ref.constant.ts`).
   async handleCancelReservation(
     ref: string,
     createdUserId?: string | null,

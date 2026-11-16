@@ -34,8 +34,6 @@ import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/sha
 import { FindAllGiftCardDto } from './dto/find-all-gift-card.dto';
 import { createSortOptions } from 'src/shared/utils/obj.util';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
-import { CoinPolicy } from '../coin-policy/entities/coin-policy.entity';
-import { CoinPolicyKeyEnum } from '../coin-policy/coin-policy.enum';
 import { CoinPolicyException } from '../coin-policy/coin-policy.exception';
 import { CoinPolicyValidation } from '../coin-policy/coin-policy.validation';
 import { assertUserKeyLoaded } from 'src/user/user.constant';
@@ -45,6 +43,7 @@ import {
   batchLookupSharedUserIdentities,
 } from 'src/user/user.helper';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { SharedCoinPolicyService } from 'src/shared/services/shared-coin-policy.service';
 
 @Injectable()
 export class GiftCardService {
@@ -62,8 +61,6 @@ export class GiftCardService {
     private readonly coRepository: Repository<CardOrder>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(CoinPolicy)
-    private coinPolicyRepository: Repository<CoinPolicy>,
     @InjectMapper()
     private readonly mapper: Mapper,
     @Inject(WINSTON_MODULE_NEST_PROVIDER)
@@ -75,6 +72,8 @@ export class GiftCardService {
     private readonly ptService: SharedPointTransactionService,
     // Buoc 3.4 - `usedBy.isActive` lay tu shared-user (applyNestedUserFlags).
     private readonly sharedUserServiceClient: SharedUserServiceClient,
+    // Buoc 5.4 (5-b) - luat tran so du goi chung, khong viet lap o `redeem`.
+    private readonly sharedCoinPolicyService: SharedCoinPolicyService,
   ) { }
 
   async use(req: UseGiftCardDto) {
@@ -228,12 +227,6 @@ export class GiftCardService {
     const context = `${GiftCardService.name}.${this.redeem.name}`;
     this.logger.log(`Use gift card ${JSON.stringify(payload)}`, context);
 
-    const policy = await this.coinPolicyRepository.findOne({
-      where: {
-        key: CoinPolicyKeyEnum.MAX_BALANCE
-      }
-    })
-
     const user = await this.userRepository.findOne({
       where: {
         slug: payload.userSlug,
@@ -261,13 +254,20 @@ export class GiftCardService {
     if (!gc)
       throw new GiftCardException(GiftCardValidation.GIFT_CARD_NOT_FOUND);
 
-    if (policy?.isActive) {
-      const balance = await this.balanceService.findOneByField({ sharedUserId, slug: null });
-      const newBalance = balance.points + gc.cardPoints;
-      const maxBalance = +policy.value;
-      if (newBalance > maxBalance)
-        throw new CoinPolicyException(CoinPolicyValidation.EXCEED_MAXIMUM_BALANCE);
-    }
+    // Buoc 5.4 (5-b): goi chung `isExceedBalance` - cung luat, cung thong bao
+    // voi duong don the. Ban viet lap truoc day con cong chuoi: `points` la cot
+    // DECIMAL nen mysql2 tra chuoi, `"900.00" + 500` ⇒ "900.00500" ⇒ so voi
+    // tran nhu 900.005 - bo qua diem cua the (do song 16/11/2026: dung the
+    // vuot tran van qua).
+    if (
+      await this.sharedCoinPolicyService.isExceedBalance({
+        sharedUserId,
+        totalPoints: gc.cardPoints,
+      })
+    )
+      throw new CoinPolicyException(
+        CoinPolicyValidation.EXCEED_MAXIMUM_BALANCE,
+      );
 
     if (gc.status === GiftCardStatus.USED)
       throw new GiftCardException(GiftCardValidation.GC_USED);

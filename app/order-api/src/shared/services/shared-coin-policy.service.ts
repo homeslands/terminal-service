@@ -31,6 +31,9 @@ export class SharedCoinPolicyService {
     });
     if (!policy?.isActive) return false;
 
+    // Buoc 5.4 (5-b): CHO DOC SO DU DUY NHAT cua luat tran (don the + dung the
+    // qua deu goi ham nay). Doi dich o 7.7 (QD-T2): doc so du tu vi o shared-user.
+    // Tran (`coin_policy`) van la luat cua terminal, khong doi cho.
     const balance = await this.balanceService.findOneByField({
       sharedUserId: payload.sharedUserId,
       slug: null,

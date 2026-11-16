@@ -241,6 +241,13 @@ export class GiftCardService {
     });
     if (!user) throw new AuthException(AuthValidation.USER_NOT_FOUND);
 
+    // C3 — MOT nguon khoa (buoc 2.12/2.13 — 2C). Buoc 5.2: lay khoa vi cua
+    // nguoi dung the ngay day, qua `assertUserKeyLoaded`, de phep doc so du cua
+    // luat tran cung di qua no (truoc doc thang `user.sharedUserId`). Thieu
+    // khoa ⇒ hong ON AO (400 / 137000) truoc moi lenh ghi. Ba lenh vi o `use()`
+    // xung bang `gc.usedBy` - chinh ban ghi `user` nay (C3).
+    const sharedUserId = assertUserKeyLoaded(user.sharedUserId, context);
+
     // GIU NGUYEN LOI GOC - BE-7 (`progress/loi-co-tu-truoc.md`, nguoi dung chot
     // 17/11/2026, sua gop sau giai doan 10): doc the -> kiem `status` ->
     // `save(USED)` khong khoa hang, `use()` cong xu sau khi ham nay tra ve ⇒
@@ -255,7 +262,7 @@ export class GiftCardService {
       throw new GiftCardException(GiftCardValidation.GIFT_CARD_NOT_FOUND);
 
     if (policy?.isActive) {
-      const balance = await this.balanceService.findOneByField({ sharedUserId: user.sharedUserId, slug: null });
+      const balance = await this.balanceService.findOneByField({ sharedUserId, slug: null });
       const newBalance = balance.points + gc.cardPoints;
       const maxBalance = +policy.value;
       if (newBalance > maxBalance)

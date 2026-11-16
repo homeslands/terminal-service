@@ -36,6 +36,22 @@ import { Printer } from 'src/printer/entity/printer.entity';
 import { PrinterDataType } from 'src/printer/printer.constants';
 import { PrinterConnectorUtils } from 'src/printer-connector/printer-connector.utils';
 import { PrinterUtils } from 'src/printer/printer.utils';
+import { User } from 'src/user/user.entity';
+import { isDefaultCustomer } from 'src/user/user.constant';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
+
+// Buoc 4.5 - nguoi mua la khach vang lai (hang sentinel dung chung) thi in nhan
+// co dinh, khong tra shared-user cho nguoi mua.
+const WALK_IN_CUSTOMER_NAME = 'Khách vãng lai';
+
+// Ten hien thi tu identity cua shared-user. Bo phan rong thay vi in
+// "null"/"undefined" nhu khi ghep thang hai cot cuc bo.
+const fullNameOf = (identity: SharedUserLookupResponse): string =>
+  [identity.firstName, identity.lastName].filter(Boolean).join(' ');
 import { WorkShift } from 'src/work-shift/work-shift.entity';
 import { WorkShiftStatus } from 'src/work-shift/work-shift.constants';
 
@@ -59,6 +75,7 @@ export class InvoiceService {
     private readonly printerUtils: PrinterUtils,
     @InjectRepository(WorkShift)
     private readonly workShiftRepository: Repository<WorkShift>,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   async getWifiName(branchSlug: string): Promise<string> {
@@ -138,6 +155,62 @@ export class InvoiceService {
     this.logger.log(`Invoice png ${invoice.slug} exported`, context);
 
     return data;
+  }
+
+  /**
+   * Buoc 4.5 - ten nguoi mua va thu ngan in tren hoa don lay tu shared-user
+   * (nguon that), KHONG doc `firstName`/`lastName` cua hang `User` cuc bo.
+   * Quan he `owner`/`approvalBy` da nap san; hai `sharedUserId` gom vao MOT
+   * luot batch-lookup (trung nhau thi mot id, khong co id nao thi khong goi).
+   *
+   * - Khach vang lai (`isDefaultCustomer(order.owner)`): nguoi mua in
+   *   "Khách vãng lai", khong tra shared-user.
+   * - `approvalBy` null: `cashier` = null, ham dung hoa don in "Không xác định".
+   * - FAIL-CLOSED: shared-user khong tra loi => `SharedUserUnavailableException`
+   *   (503); nguoi mua / thu ngan khong co identity => `CREATE_INVOICE_ERROR`.
+   *   Ca hai nem TRUOC khi dung + ghi hoa don: khong bao gio ra hoa don thieu
+   *   ten hay mang ten cache cu. Hoa don da ton tai thi `create` tra som,
+   *   khong goi ham nay.
+   */
+  private async invoiceNamesOf(
+    order: Order,
+    context: string,
+  ): Promise<{ customer: string; cashier: string | null }> {
+    const walkIn = isDefaultCustomer(order.owner);
+    const identities = await batchLookupSharedUserIdentities(
+      [
+        walkIn ? null : order.owner?.sharedUserId,
+        order.approvalBy?.sharedUserId,
+      ],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    const nameOf = (
+      role: 'customer' | 'cashier',
+      person: User | null | undefined,
+    ): string => {
+      const identity = person?.sharedUserId
+        ? identities.get(person.sharedUserId)
+        : undefined;
+      if (!identity) {
+        this.logger.warn(
+          `Invoice for order ${order.slug} is not built: no shared-user identity for ${role} ${person?.id} (sharedUserId ${person?.sharedUserId})`,
+          context,
+        );
+        throw new InvoiceException(
+          InvoiceValidation.CREATE_INVOICE_ERROR,
+          `No shared-user identity for the ${role} of order ${order.slug}`,
+        );
+      }
+      return fullNameOf(identity);
+    };
+    return {
+      customer: walkIn
+        ? WALK_IN_CUSTOMER_NAME
+        : nameOf('customer', order.owner),
+      cashier: order.approvalBy ? nameOf('cashier', order.approvalBy) : null,
+    };
   }
 
   async create(orderSlug: string) {
@@ -273,6 +346,9 @@ export class InvoiceService {
       return order.invoice;
     }
 
+    // Buoc 4.5 - tra ten TRUOC khi dung + ghi hoa don (fail-closed).
+    const { customer, cashier } = await this.invoiceNamesOf(order, context);
+
     const invoiceItems = order.orderItems.map((item) => {
       const invoiceItem = new InvoiceItem();
       Object.assign(invoiceItem, {
@@ -317,11 +393,9 @@ export class InvoiceService {
       tableName:
         order.type === OrderType.AT_TABLE ? order.table.name : 'take out',
       timeLeftTakeOut: order.timeLeftTakeOut,
-      customer: `${order.owner.firstName} ${order.owner.lastName}`,
+      customer,
       branchAddress: order.branch.address,
-      cashier: order.approvalBy
-        ? `${order.approvalBy?.firstName} ${order.approvalBy?.lastName}`
-        : 'Không xác định',
+      cashier: cashier ?? 'Không xác định',
       invoiceItems,
       qrcode,
       referenceNumber: order.referenceNumber,
@@ -440,6 +514,9 @@ export class InvoiceService {
       throw new OrderException(OrderValidation.ORDER_IS_NOT_PENDING);
     }
 
+    // Buoc 4.5 - tra ten TRUOC khi dung + ghi hoa don (fail-closed).
+    const { customer, cashier } = await this.invoiceNamesOf(order, context);
+
     let orderItemPromotionValue = 0;
 
     // default from order
@@ -523,11 +600,9 @@ export class InvoiceService {
       tableName:
         order.type === OrderType.AT_TABLE ? order.table.name : 'take out',
       timeLeftTakeOut: order.timeLeftTakeOut,
-      customer: `${order.owner.firstName} ${order.owner.lastName}`,
+      customer,
       branchAddress: order.branch.address,
-      cashier: order.approvalBy
-        ? `${order.approvalBy?.firstName} ${order.approvalBy?.lastName}`
-        : 'Không xác định',
+      cashier: cashier ?? 'Không xác định',
       invoiceItems,
       expiredAt: moment(order.createdAt).add(15, 'minutes').toDate(),
       exportAt: new Date(),

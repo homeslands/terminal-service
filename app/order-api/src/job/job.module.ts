@@ -40,6 +40,7 @@ import { AccumulatedPointModule } from 'src/accumulated-point/accumulated-point.
 import { Printer } from 'src/printer/entity/printer.entity';
 import { PrinterConnectorModule } from 'src/printer-connector/printer-connector.module';
 import { PrinterModule } from 'src/printer/printer.module';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { WorkShift } from 'src/work-shift/work-shift.entity';
 
 @Module({
@@ -67,6 +68,8 @@ import { WorkShift } from 'src/work-shift/work-shift.entity';
     }),
     MailModule,
     NotificationModule,
+    // JobModule tu khai InvoiceService trong providers => can client shared-user (buoc 4.5).
+    SharedUserServiceModule,
     ACBConnectorModule,
     SharedModule,
     AccumulatedPointModule,

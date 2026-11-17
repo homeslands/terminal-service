@@ -7,6 +7,9 @@ import { LessThan, LessThanOrEqual, Repository } from 'typeorm';
 import { CampaignStatus, CampaignType } from './campaign.constants';
 import { CampaignService } from './campaign.service';
 import { Campaign } from './entity/campaign.entity';
+import { CampaignIdentities } from './strategy/campaign.strategy';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
 
 @Injectable()
 export class CampaignScheduler {
@@ -17,6 +20,7 @@ export class CampaignScheduler {
     private readonly campaignRepository: Repository<Campaign>,
     private readonly campaignService: CampaignService,
     @Inject(WINSTON_MODULE_NEST_PROVIDER) private readonly logger: Logger,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -67,11 +71,38 @@ export class CampaignScheduler {
       context,
     );
 
+    // Buoc 5.6 (5.2(a)): MOT luot lookupByIds cho ca lo (client tu chia moi
+    // 200 id) - strategy lay ngon ngu thong bao tu map nay, khong tra lai trong
+    // vong lap. Loc `dobDM` cuc bo o tren de lai buoc 8.1.
+    let identities: CampaignIdentities;
+    try {
+      identities = await batchLookupSharedUserIdentities(
+        birthdayUsers.map((user) => user.sharedUserId),
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
+    } catch {
+      // Da log nguyen nhan (Failed to batch-lookup) - ca lo coi nhu khong tra
+      // duoc: bo qua tung nguoi ben duoi, khong lam chet job.
+      identities = new Map();
+    }
+
     for (const user of birthdayUsers) {
+      // Chinh sach loi: khong tra duoc nguoi nay => bo qua (khong cap thuong,
+      // khong thong bao bang du lieu cu), ghi log, TIEP TUC LO.
+      if (!user.sharedUserId || !identities.has(user.sharedUserId)) {
+        this.logger.warn(
+          `User ${user.id} (${user.slug}) has no shared-user identity (sharedUserId=${user.sharedUserId ?? 'null'}), skip birthday`,
+          context,
+        );
+        continue;
+      }
       try {
         await this.campaignService.triggerForUser(
           user,
           CampaignType.USER_BIRTHDAY,
+          identities,
         );
       } catch (error) {
         this.logger.error(

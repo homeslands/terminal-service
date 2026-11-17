@@ -21,7 +21,10 @@ import {
   GetAllCampaignQueryRequestDto,
   UpdateCampaignRequestDto,
 } from './campaign.dto';
-import { ICampaignStrategy } from './strategy/campaign.strategy';
+import {
+  CampaignIdentities,
+  ICampaignStrategy,
+} from './strategy/campaign.strategy';
 import { NewUserCampaignStrategy } from './strategy/new-user-campaign/new-user-campaign.strategy';
 import { UserBirthdayCampaignStrategy } from './strategy/user-birthday-campaign/user-birthday-campaign.strategy';
 import { RoleEnum } from 'src/role/role.enum';
@@ -290,7 +293,15 @@ export class CampaignService {
     this.logger.log(`Campaign deleted: ${slug}`, context);
   }
 
-  async triggerForUser(user: User, campaignType: CampaignType): Promise<void> {
+  /**
+   * `identities` (buoc 5.6): duong LO truyen map identity da tra MOT luot cho
+   * ca lo; duong mot nguoi (event) de trong - strategy tu tra.
+   */
+  async triggerForUser(
+    user: User,
+    campaignType: CampaignType,
+    identities?: CampaignIdentities,
+  ): Promise<void> {
     const context = `${CampaignService.name}.${this.triggerForUser.name}`;
 
     const roleName =
@@ -331,7 +342,7 @@ export class CampaignService {
 
       try {
         const strategy = this.selectStrategy(campaign);
-        await strategy.execute(campaign, user);
+        await strategy.execute(campaign, user, identities);
       } catch (error) {
         this.logger.warn(
           `Campaign ${campaign.slug} failed for user ${user.id}: ${error.message}`,

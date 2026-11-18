@@ -9,6 +9,11 @@
 // SONG DOI, cung ten cung gia tri, o shared-user va trend.
 export const INTERNAL_BATCH_LOOKUP_MAX = 200;
 
+// QD4 (buoc 7.1) - POST /internal/users/search-by-phonenumber. shared-user
+// tu choi (400, ma 137007) khi khop nhieu hon tran nay - KHONG cat bot. Khai
+// SONG DOI, cung ten cung gia tri, o shared-user va trend.
+export const INTERNAL_SEARCH_BY_PHONENUMBER_MAX = 500;
+
 // QD21 - POST /internal/users/list-recent. Luoi rong quet cua so 48 gio,
 // co the la vai nghin hang sau mot dot su co => phan trang la BAT BUOC.
 export const INTERNAL_LIST_RECENT_PAGE_SIZE = 200;

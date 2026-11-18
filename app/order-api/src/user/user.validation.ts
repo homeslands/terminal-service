@@ -7,6 +7,7 @@ export const INVALID_LANGUAGE = 'INVALID_LANGUAGE';
 export const OWNER_NOT_A_CUSTOMER = 'OWNER_NOT_A_CUSTOMER';
 export const USER_OWNED_BY_ANOTHER_SERVICE = 'USER_OWNED_BY_ANOTHER_SERVICE';
 export const CANNOT_ASSIGN_CUSTOMER_ROLE = 'CANNOT_ASSIGN_CUSTOMER_ROLE';
+export const PHONENUMBER_SEARCH_TOO_BROAD = 'PHONENUMBER_SEARCH_TOO_BROAD';
 export type TUserErrorCodeKey =
   | typeof USER_NOT_FOUND
   | typeof CANNOT_UPDATE_CUSTOMER_ROLE
@@ -14,7 +15,8 @@ export type TUserErrorCodeKey =
   | typeof INVALID_LANGUAGE
   | typeof OWNER_NOT_A_CUSTOMER
   | typeof USER_OWNED_BY_ANOTHER_SERVICE
-  | typeof CANNOT_ASSIGN_CUSTOMER_ROLE;
+  | typeof CANNOT_ASSIGN_CUSTOMER_ROLE
+  | typeof PHONENUMBER_SEARCH_TOO_BROAD;
 export type TUserErrorCode = Record<TUserErrorCodeKey, TErrorCodeValue>;
 
 // 137000 - 138000
@@ -39,5 +41,12 @@ export const UserValidation: TUserErrorCode = {
   CANNOT_ASSIGN_CUSTOMER_ROLE: createErrorCode(
     137006,
     'Can not assign customer role',
+  ),
+  // QD4 (buoc 7.1) - o tim SDT khop qua nhieu nguoi o shared-user
+  // (search-by-phonenumber vuot INTERNAL_SEARCH_BY_PHONENUMBER_MAX). CUNG SO
+  // voi shared-user va trend; UI dich thanh "tim hep lai".
+  PHONENUMBER_SEARCH_TOO_BROAD: createErrorCode(
+    137007,
+    'Phone number search matches too many users, please narrow the search',
   ),
 };

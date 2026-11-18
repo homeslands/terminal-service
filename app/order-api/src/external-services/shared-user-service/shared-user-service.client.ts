@@ -180,6 +180,10 @@ export interface SharedBalanceMoveRequest {
   desc?: string;
 }
 
+// Hau to khoa cua lenh hoan (`release`) - khop `WALLET_RELEASE_SUFFIX` o
+// shared-user (`balance-internal.dto.ts`).
+export const WALLET_RELEASE_SUFFIX = ':release';
+
 // Tra loi cua credit / debit / release: so du SAU giao dich (dung luon, khong
 // doc lai). `replayed` = khoa da ghi tu truoc, lan nay khong ghi them.
 export interface SharedBalanceMove {
@@ -630,6 +634,41 @@ export class SharedUserServiceClient {
     );
   }
 
+  // Buoc 7.7c (trend-api.md 7.4(c), QD9): tru xu MOT nhip o vi shared-user,
+  // idempotent theo `transactionId` (`<service>:<orderSlug>:debit`). Thieu xu
+  // => shared-user tra 400/158205 (chan am o tang DB), nem nguyen loi axios.
+  debitBalance(body: SharedBalanceMoveRequest): Promise<SharedBalanceMove> {
+    return this.postMoney<SharedBalanceMove>(
+      'internal/balance/debit',
+      body,
+      (transaction) => this.moveFromLedger(transaction),
+    );
+  }
+
+  // Buoc 7.7c (Z-7): tra lai mot lan tru (`<khoa debit>` => dong cong
+  // `<khoa debit>:release`, idempotent: hoan hai lan chi tra mot lan). Hong
+  // hai lan => tra so cai bang khoa `:release` (KHONG phai khoa debit - dong
+  // debit luon co san).
+  releaseBalance(debitTransactionId: string): Promise<SharedBalanceMove> {
+    return this.postMoney<SharedBalanceMove>(
+      'internal/balance/release',
+      { transactionId: debitTransactionId },
+      (transaction) => this.moveFromLedger(transaction),
+      `${debitTransactionId}${WALLET_RELEASE_SUFFIX}`,
+    );
+  }
+
+  // Buoc 7.7c: lan tru mang khoa nay da bi hoan (Z-7) chua. Khoa da hoan thi
+  // `debit` cung khoa chi con tra `replayed` - khong tru them - nen ben goi
+  // KHONG duoc coi do la "da tra". shared-user khong tra loi => 503.
+  async isDebitReleased(debitTransactionId: string): Promise<boolean> {
+    return (
+      (await this.lookupBalanceTransaction(
+        `${debitTransactionId}${WALLET_RELEASE_SUFFIX}`,
+      )) !== null
+    );
+  }
+
   // Dong so cai tim thay sau hai lan hong => tra loi nhu mot lan `replayed`.
   private moveFromLedger(
     transaction: SharedBalanceTransaction,
@@ -698,6 +737,9 @@ export class SharedUserServiceClient {
     relativePath: string,
     body: { transactionId: string },
     fromLedger?: (transaction: SharedBalanceTransaction) => T,
+    // Buoc 7.7c: khoa cua DONG SO CAI ma lenh nay ghi - mac dinh la
+    // `transactionId`; `release` ghi duoi `<khoa debit>:release`.
+    ledgerKey: string = body.transactionId,
   ): Promise<T> {
     const key = body.transactionId;
     const describe = (error: unknown): string => {
@@ -741,16 +783,16 @@ export class SharedUserServiceClient {
 
     let transaction: SharedBalanceTransaction | null;
     try {
-      transaction = await this.lookupBalanceTransaction(key);
+      transaction = await this.lookupBalanceTransaction(ledgerKey);
     } catch (error) {
       this.logger.error(
-        `shared-user money write failed twice and lookup-transaction failed too - outcome UNKNOWN, reconcile by key: path=${relativePath} key=${key} ${describe(error)}`,
+        `shared-user money write failed twice and lookup-transaction failed too - outcome UNKNOWN, reconcile by key: path=${relativePath} key=${key} ledgerKey=${ledgerKey} ${describe(error)}`,
       );
       throw new SharedUserUnavailableException();
     }
     if (!transaction) {
       this.logger.error(
-        `shared-user money write failed twice, lookup-transaction says NOT written yet (a write held up at shared-user can still land after this lookup - reconcile by key): path=${relativePath} key=${key}`,
+        `shared-user money write failed twice, lookup-transaction says NOT written yet (a write held up at shared-user can still land after this lookup - reconcile by key): path=${relativePath} key=${key} ledgerKey=${ledgerKey}`,
       );
       throw new SharedUserUnavailableException();
     }

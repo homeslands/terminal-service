@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { ProductController } from './product.controller';
@@ -40,6 +41,8 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
 
 @Module({
   imports: [
+    // Buoc 7.7c: OrderUtils.deleteOrder hoan khoa debit xu qua shared-user.
+    SharedUserServiceModule,
     TypeOrmModule.forFeature([
       Product,
       Variant,

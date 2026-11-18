@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { BranchRevenueController } from './branch-revenue.controller';
 import { BranchRevenueService } from './branch-revenue.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -33,6 +34,8 @@ import { AccumulatedPointTransactionHistory } from 'src/accumulated-point/entiti
 import { User } from 'src/user/user.entity';
 @Module({
   imports: [
+    // Buoc 7.7c: OrderUtils.deleteOrder hoan khoa debit xu qua shared-user.
+    SharedUserServiceModule,
     TypeOrmModule.forFeature([
       Branch,
       BranchRevenue,

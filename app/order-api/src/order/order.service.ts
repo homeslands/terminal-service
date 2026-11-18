@@ -91,6 +91,7 @@ import {
   isDefaultCustomer,
 } from 'src/user/user.constant';
 import { orderRef } from 'src/shared/constants/service-ref.constant';
+import { PaymentMethod } from 'src/payment/payment.constants';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { mergeOrderOwnerIdentity } from './order-owner-identity';
 @Injectable()
@@ -236,6 +237,14 @@ export class OrderService {
           orderRef(order.slug),
           null,
         );
+        // Buoc 7.7c: nhu `OrderUtils.deleteOrder` - don tra bang xu con PENDING co
+        // the DA bi tru; hoan khoa debit truoc khi xoa (helper dung chung).
+        if (payment?.paymentMethod === PaymentMethod.POINT) {
+          await this.orderUtils.releaseXuDebitOfDeletedOrder(
+            order.slug,
+            context,
+          );
+        }
         // Update subtotal and accumulated points to use in order
         const subtotalBeforeUseAccumulatedPoints =
           order.subtotal + order.accumulatedPointsToUse;

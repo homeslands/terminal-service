@@ -231,7 +231,15 @@ export class OrderTableResponseDto extends BaseResponseDto {
   status: string;
 }
 
-export class OrderResponseDto extends BaseResponseDto {
+/**
+ * Buoc 7.4 (QD5) - moi field cua mot don hang TRU `owner` / `approvalBy`.
+ *
+ * automapper khong cat field theo ngu canh duoc, nen nhanh bep (`chef-order`
+ * -> `order`) can mot DTO rieng khong co hai field do; tach lop nen de hai DTO
+ * khong lech nhau khi ai them field (them o day = them cho ca hai).
+ * `OrderResponseDto` = lop nen + `owner` + `approvalBy` (shape khong doi).
+ */
+export class OrderBaseResponseDto extends BaseResponseDto {
   @AutoMap()
   referenceNumber: number;
 
@@ -258,12 +266,6 @@ export class OrderResponseDto extends BaseResponseDto {
 
   @AutoMap()
   tableName: string;
-
-  @AutoMap(() => OwnerResponseDto)
-  owner: OwnerResponseDto;
-
-  @AutoMap(() => ApprovalUserResponseDto)
-  approvalBy: ApprovalUserResponseDto;
 
   @AutoMap(() => [OrderItemResponseDto])
   orderItems: OrderItemResponseDto[];
@@ -305,6 +307,25 @@ export class OrderResponseDto extends BaseResponseDto {
   @ApiProperty()
   totalVatValue: number;
 }
+
+export class OrderResponseDto extends OrderBaseResponseDto {
+  // Buoc 7.3: `phonenumber` / `firstName` / `lastName` cua hai field nay ghep
+  // tu shared-user o `mergeOrderOwnerIdentity` - moi cho map phai goi no.
+  @AutoMap(() => OwnerResponseDto)
+  owner: OwnerResponseDto;
+
+  @AutoMap(() => ApprovalUserResponseDto)
+  approvalBy: ApprovalUserResponseDto;
+}
+
+/**
+ * Buoc 7.4 (QD5) - `order` long trong `ChefOrderResponseDto` (GET /chef-order*,
+ * va gian tiep /chef-order-item*, /chef-area*). KHONG co `owner` /
+ * `approvalBy`: man bep khong can ten khach, va day la man duoc lam moi lien
+ * tuc - bo hai field la bo luot goi shared-user tren duong tai cao nhat.
+ * Khong khai lai hai field o day.
+ */
+export class ChefOrderNestedOrderResponseDto extends OrderBaseResponseDto {}
 
 export class GetOrderRequestDto extends BaseQueryDto {
   @AutoMap()

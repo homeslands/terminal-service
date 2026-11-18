@@ -33,10 +33,7 @@ import {
 import { CardException } from '../card/card.exception';
 import { CardValidation } from '../card/card.validation';
 import { GiftCardService } from '../gift-card/gift-card.service';
-import {
-  PointTransactionObjectTypeEnum,
-  PointTransactionTypeEnum,
-} from '../point-transaction/entities/point-transaction.enum';
+import { PointTransactionObjectTypeEnum } from '../point-transaction/entities/point-transaction.enum';
 import _ from 'lodash';
 import {
   PaymentMethod,
@@ -47,9 +44,6 @@ import { FeatureFlag } from '../feature-flag/entities/feature-flag.entity';
 import { FeatureFlagException } from '../feature-flag/feature-flag.exception';
 import { FeatureFlagValidation } from '../feature-flag/feature-flag.validation';
 import { FeatureGroupConstant } from '../feature-flag/feature-group.constant';
-import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
-import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
-import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import { assertUserKeyLoaded } from 'src/user/user.constant';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
 import { Payment } from 'src/payment/entity/payment.entity';
@@ -78,6 +72,7 @@ import {
   SharedUserLookupResponse,
   SharedUserServiceClient,
 } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { cardOrderIdempotencyKey } from 'src/shared/constants/service-ref.constant';
 import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
 
 // Buoc 5.3 (5-a): ten chep vao cot snapshot lay tu identity cua shared-user.
@@ -109,8 +104,8 @@ export class CardOrderService {
     private readonly transactionService: TransactionManagerService,
     private readonly bankTransferStrategy: BankTransferStrategy,
     private readonly gcService: GiftCardService,
-    private readonly balanceService: SharedBalanceService,
-    private readonly ptService: SharedPointTransactionService,
+    // Buoc 7.7b: bo SharedBalanceService + SharedPointTransactionService - cong
+    // xu va dong so cai di qua `sharedUserServiceClient.creditBalance`.
     // Buoc 5.2 (5-a4) bo `SharedUserRefService` khoi tep nay: moi khoa vi cua
     // don the / nguoi nhan doc `.sharedUserId` tu quan he da nap (`customer`,
     // `receipients.recipient`) hoac tu ban ghi `user` vua tra, qua
@@ -1065,29 +1060,24 @@ export class CardOrderService {
             context,
           );
 
-          // Update recipient balance ONCE after all cards
-          // Buoc 5.5: doi dich o 7.7 ⇒ gui kem cardOrderIdempotencyKey(<slug don>, <sharedUserId NGUOI NHAN nay>) - Z-2: moi nguoi nhan mot khoa (`shared/constants/service-ref.constant.ts`).
-          await this.balanceService.calcBalance({
-            sharedUserId: recipientSharedUserId,
+          // Buoc 7.7b (trend-api.md 7.4(b)): cong xu vao vi shared-user - MOT lenh
+          // mang ca dong so cai (objectType/objectId/objectSlug/desc) va tra so du
+          // sau khi cong: khong con luot doc-sau-cong, khong con lenh tao dong
+          // `point_transaction` rieng. Khoa cardOrderIdempotencyKey(<slug don>, <sharedUserId
+          // NGUOI NHAN nay>) - Z-2: moi nguoi nhan mot khoa. Goi lai
+          // `_generateAndRedeem` (BE-16) => `replayed`, khong cong lan hai.
+          await this.sharedUserServiceClient.creditBalance({
+            userId: recipientSharedUserId,
             points: totalAmount,
-            type: PointTransactionTypeEnum.IN,
-          });
-
-          const currentBalance = await this.balanceService.findOneByField({
-            sharedUserId: recipientSharedUserId,
-            slug: null,
-          });
-
-          // Create transaction record
-          await this.ptService.create({
-            type: PointTransactionTypeEnum.IN,
-            desc: `Nạp ${totalAmount.toLocaleString()} xu từ người gửi ${databaseEntity.customerName}(${databaseEntity.customerPhone})`,
+            transactionId: cardOrderIdempotencyKey(
+              databaseEntity.slug,
+              recipientSharedUserId,
+            ),
             objectType: PointTransactionObjectTypeEnum.CARD_ORDER,
+            objectId: databaseEntity.id,
             objectSlug: databaseEntity.slug,
-            points: totalAmount,
-            sharedUserId: recipientSharedUserId,
-            balance: currentBalance.points,
-          } satisfies CreatePointTransactionPayload);
+            desc: `Nạp ${totalAmount.toLocaleString()} xu từ người gửi ${databaseEntity.customerName}(${databaseEntity.customerPhone})`,
+          });
         }
         break;
       case CardOrderType.SELF:
@@ -1116,28 +1106,23 @@ export class CardOrderService {
           context,
         );
 
-        //  Update recipient balance ONCE after all cards
-        // Buoc 5.5: doi dich o 7.7 ⇒ gui kem cardOrderIdempotencyKey(<slug don>, <sharedUserId chu don>) (`shared/constants/service-ref.constant.ts`).
-        await this.balanceService.calcBalance({
-          sharedUserId: customerSharedUserId,
+        // Buoc 7.7b (trend-api.md 7.4(b)): cong xu vao vi shared-user - MOT lenh
+        // mang ca dong so cai (objectType/objectId/objectSlug/desc) va tra so du
+        // sau khi cong: khong con luot doc-sau-cong, khong con lenh tao dong
+        // `point_transaction` rieng. Khoa cardOrderIdempotencyKey(<slug don>, <sharedUserId
+        // chu don>). Goi lai `_generateAndRedeem` (BE-16) => `replayed`.
+        await this.sharedUserServiceClient.creditBalance({
+          userId: customerSharedUserId,
           points: totalAmount,
-          type: PointTransactionTypeEnum.IN,
-        });
-
-        const currentBalance = await this.balanceService.findOneByField({
-          sharedUserId: customerSharedUserId,
-          slug: null,
-        });
-
-        await this.ptService.create({
-          type: PointTransactionTypeEnum.IN,
-          desc: `Nạp cho bản thân ${totalAmount.toLocaleString()} xu`,
+          transactionId: cardOrderIdempotencyKey(
+            databaseEntity.slug,
+            customerSharedUserId,
+          ),
           objectType: PointTransactionObjectTypeEnum.CARD_ORDER,
+          objectId: databaseEntity.id,
           objectSlug: databaseEntity.slug,
-          points: totalAmount,
-          sharedUserId: customerSharedUserId,
-          balance: currentBalance.points,
-        } satisfies CreatePointTransactionPayload);
+          desc: `Nạp cho bản thân ${totalAmount.toLocaleString()} xu`,
+        });
 
         break;
       case CardOrderType.BUY:

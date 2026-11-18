@@ -4,7 +4,7 @@ import { IsEnum, IsNotEmpty, IsOptional } from 'class-validator';
 import { BaseQueryDto, BaseResponseDto } from 'src/app/base.dto';
 import { ChefAreaResponseDto } from 'src/chef-area/chef-area.dto';
 import { ChefOrderItemResponseDto } from 'src/chef-order-item/chef-order-item.dto';
-import { OrderResponseDto } from 'src/order/order.dto';
+import { ChefOrderNestedOrderResponseDto } from 'src/order/order.dto';
 import { ChefOrderStatus } from './chef-order.constants';
 import { Type } from 'class-transformer';
 import { PrinterJobResponseDto } from 'src/printer/printer.dto';
@@ -26,8 +26,10 @@ export class ChefOrderResponseDto extends BaseResponseDto {
   @AutoMap(() => ChefAreaResponseDto)
   chefArea: ChefAreaResponseDto;
 
-  @AutoMap(() => OrderResponseDto)
-  order: OrderResponseDto;
+  // Buoc 7.4 (QD5): don long KHONG co owner / approvalBy (xem
+  // `ChefOrderNestedOrderResponseDto`). API thay doi - da bao truoc.
+  @AutoMap(() => ChefOrderNestedOrderResponseDto)
+  order: ChefOrderNestedOrderResponseDto;
 
   @AutoMap(() => [ChefOrderItemResponseDto])
   chefOrderItems: ChefOrderItemResponseDto[];

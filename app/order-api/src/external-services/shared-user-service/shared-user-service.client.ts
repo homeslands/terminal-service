@@ -226,6 +226,15 @@ export interface SharedAccumulatedPointMove {
   createdAt: string;
 }
 
+// Buoc 7.7d (QD-T10): `/internal/balance/lookup` - so du + `slug` /
+// `createdAt` cua hang vi (null khi nguoi chua co hang vi).
+export interface SharedBalanceLookup {
+  userId: string;
+  points: number;
+  slug: string | null;
+  createdAt: string | null;
+}
+
 // Buoc 7.7d: bo loc cua nhom route "xem ho" (`/internal/point-transactions/*`).
 export type SharedPointTransactionViewRequest = Record<string, unknown>;
 
@@ -645,6 +654,25 @@ export class SharedUserServiceClient {
         { userId },
       );
       return Number(points);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Buoc 7.7d (QD-T10): ca hang vi cua MOT nguoi cho `GET /balance?userSlug=`
+  // cua nhan vien - route do giu khuon mono { slug, createdAt, points } (muc
+  // 1.4). 404 = shared-user khong co user nay => `null`. Loi khac =>
+  // 503/162001, KHONG hieu thanh "chua co vi".
+  async lookupBalance(userId: string): Promise<SharedBalanceLookup | null> {
+    try {
+      return await this.post<SharedBalanceLookup>('internal/balance/lookup', {
+        userId,
+      });
     } catch (error) {
       if (
         (error as { response?: { status?: number } })?.response?.status === 404

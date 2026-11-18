@@ -29,7 +29,16 @@ import { ExportFilename } from 'src/shared/constants/export-filename.constant';
 import { GetAnalyzePointTransactionApi } from './point-transaction.swagger';
 import { RestController } from 'src/shared/decorators/rest-controller.decorator';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { HasRoles } from 'src/role/roles.decorator';
+import { RoleEnum } from 'src/role/role.enum';
 
+// Buoc 7.7d (QD17, QD-T6): moi route "xem" o day la xem ho - doc giao dich xu
+// cua NGUOI KHAC (hoac toan he thong) o shared-user, sau khi service nay kiem
+// role. Khach tu xem lich su cua minh goi thang shared-user (7.8 doi client).
+// - xem mot khach (danh sach, mot giao dich): nhan vien + Cashier + Telesale;
+// - moi path co `analysis` / `export`: Manager, Admin, SuperAdmin.
+// Role viet TUONG MINH tung `RoleEnum.X` (ca kiem tinh doc chu trong
+// decorator). `POST /` khong gac o day - bi xoa o 7.9.
 @RestController({
   path: 'point-transaction',
   tags: ['Point Transaction Resources'],
@@ -42,6 +51,7 @@ export class PointTransactionController {
   ) { }
 
   @Get(':slug/export')
+  @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   @ApiOperation({ summary: 'Export point transaction' })
   @HttpCode(HttpStatus.OK)
   async export(@Param('slug') slug: string): Promise<StreamableFile> {
@@ -56,6 +66,7 @@ export class PointTransactionController {
   }
 
   @Get('/export')
+  @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   @ApiOperation({ summary: 'Export all point transaction by user' })
   @HttpCode(HttpStatus.OK)
   async exportAll(
@@ -73,6 +84,7 @@ export class PointTransactionController {
   }
 
   @Get('/export/system')
+  @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   @ApiOperation({ summary: 'Export all system point transactions' })
   @HttpCode(HttpStatus.OK)
   async exportAllSystem(
@@ -108,6 +120,7 @@ export class PointTransactionController {
   }
 
   @GetAnalyzePointTransactionApi({ path: 'analysis' })
+  @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   async analyze(
     @Query(new ValidationPipe({ whitelist: true, transform: true }))
     req: FindAllPointTransactionDto,
@@ -127,6 +140,14 @@ export class PointTransactionController {
   }
 
   @Get()
+  @HasRoles(
+    RoleEnum.Staff,
+    RoleEnum.Cashier,
+    RoleEnum.Telesale,
+    RoleEnum.Manager,
+    RoleEnum.Admin,
+    RoleEnum.SuperAdmin,
+  )
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Retrieve the point transactions' })
   @ApiResponseWithType({
@@ -147,6 +168,14 @@ export class PointTransactionController {
   }
 
   @Get(':slug')
+  @HasRoles(
+    RoleEnum.Staff,
+    RoleEnum.Cashier,
+    RoleEnum.Telesale,
+    RoleEnum.Manager,
+    RoleEnum.Admin,
+    RoleEnum.SuperAdmin,
+  )
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Retrieve the point transaction' })
   @ApiResponseWithType({

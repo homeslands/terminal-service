@@ -16,6 +16,8 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { User } from 'src/user/user.entity';
 import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
+import { SharedUserRefService } from 'src/shared/services/shared-user-ref.service';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
 
 @Injectable()
 export class BalanceService {
@@ -29,22 +31,52 @@ export class BalanceService {
     @Inject(WINSTON_MODULE_NEST_PROVIDER)
     private readonly logger: Logger,
     private transactionService: TransactionManagerService,
+    private readonly sharedUserRefService: SharedUserRefService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) { }
 
-  async maxBalance(payload: any) {
-    JSON.stringify(payload);
-    const result = await this.balanceRepository
-      .createQueryBuilder('b')
-      .select('MAX(b.points)', 'max')
-      .addSelect('MIN(b.points)', 'min')
-      .getRawOne();
-
+  // Buoc 7.7d (QD17): man chinh sach xu doc so du lon nhat / nho nhat cua
+  // MOI vi o shared-user (mot vi moi nguoi, khong chia theo service). Route da
+  // gac role o controller. shared-user khong tra loi => 503/162001.
+  async analyze(): Promise<MaxBalanceResponseDto> {
+    const { maxPoints, minPoints } =
+      await this.sharedUserServiceClient.analyzeBalances<MaxBalanceResponseDto>();
     const res = new MaxBalanceResponseDto();
-    res.maxPoints = Number(result.max);
-    res.minPoints = Number(result.min);
+    res.maxPoints = Number(maxPoints);
+    res.minPoints = Number(minPoints);
     return res;
   }
 
+  // Buoc 7.7d (QD-T10): `GET /balance?userSlug=` cua nhan vien - hang vi cua
+  // MOT khach, doc `/internal/balance/lookup`. Giu khuon mono (muc 1.4):
+  // { slug, createdAt, points } cua hang vi - mono map hang `balance_tbl` khong
+  // nap quan he nen khong co `user`.
+  // - slug khong co hang cuc bo => 400/137000 (`toSharedUserId`);
+  // - shared-user khong co nguoi nay (404) hoac nguoi chua co hang vi =>
+  //   BALANCE_NOT_FOUND nhu mono;
+  // - shared-user khong tra loi => 503/162001, KHONG hieu thanh "0 xu".
+  async findOneByUserSlug(userSlug: string): Promise<BalanceResponseDto> {
+    const context = `${BalanceService.name}.${this.findOneByUserSlug.name}`;
+    const sharedUserId =
+      await this.sharedUserRefService.toSharedUserId(userSlug);
+    const wallet =
+      await this.sharedUserServiceClient.lookupBalance(sharedUserId);
+    if (!wallet?.slug) {
+      this.logger.warn(
+        `No balance row for user ${userSlug} (sharedUserId ${sharedUserId}) at shared-user`,
+        context,
+      );
+      throw new BalanceException(BalanceValidation.BALANCE_NOT_FOUND);
+    }
+    return Object.assign(new BalanceResponseDto(), {
+      slug: wallet.slug,
+      createdAt: wallet.createdAt,
+      points: Number(wallet.points),
+    });
+  }
+
+  // Tu buoc 7.7d khong con ai goi (controller doc qua `findOneByUserSlug`).
+  // Giu toi khi xoa tep o 8.7 - ca giai doan 2 (khoa rong => IsNull) con soi.
   async findOneByField(payload: FindByFieldDto) {
     const context = `${BalanceService.name}.${this.findOneByField.name}`;
     this.logger.debug(

@@ -35,6 +35,7 @@ import { User } from 'src/user/user.entity';
 @Module({
   imports: [
     // Buoc 7.7c: OrderUtils.deleteOrder hoan khoa debit xu qua shared-user.
+    // Buoc 7.7d: AccumulatedPointService goi shared-user (diem tich luy).
     SharedUserServiceModule,
     TypeOrmModule.forFeature([
       Branch,

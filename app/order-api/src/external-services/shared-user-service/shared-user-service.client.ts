@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { signInternalRequest } from 'src/common/utils/internal-signature.util';
@@ -194,6 +194,40 @@ export interface SharedBalanceMove {
   replayed: boolean;
   createdAt: string;
 }
+
+// Buoc 7.7d: than lenh `add` / `reserve` sang `/internal/accumulated-points/*`
+// (shared-user 6.7). `objectSlug` la slug cua don o service nay.
+export interface SharedAccumulatedPointMoveRequest {
+  userId: string;
+  points: number;
+  transactionId: string;
+  objectType: string;
+  objectId: string;
+  objectSlug: string;
+  // Chi `add`: ti le da dung de tinh `points`, luu kem dong lich su.
+  pointsPercentage?: number;
+}
+
+// Dong lich su diem shared-user vua ghi. `transactionId` la khoa cua dong:
+// khoa gui di voi add / reserve, `<khoa giu>:confirm` / `:cancel` voi hai lenh
+// kia. `replayed` = khoa da ghi tu truoc, lan nay khong doi gi.
+export interface SharedAccumulatedPointMove {
+  transactionId: string;
+  userId: string;
+  type: string;
+  status: string;
+  points: number;
+  totalPoints: number;
+  objectType: string | null;
+  objectId: string | null;
+  objectSlug: string | null;
+  expiresAt: string | null;
+  replayed: boolean;
+  createdAt: string;
+}
+
+// Buoc 7.7d: bo loc cua nhom route "xem ho" (`/internal/point-transactions/*`).
+export type SharedPointTransactionViewRequest = Record<string, unknown>;
 
 export interface SharedMembershipCardIssued {
   cardId: string;
@@ -667,6 +701,118 @@ export class SharedUserServiceClient {
         `${debitTransactionId}${WALLET_RELEASE_SUFFIX}`,
       )) !== null
     );
+  }
+
+  // Buoc 7.7d (trend-api.md 7.4(d)): so diem tich luy tieu duoc ngay cua MOT
+  // nguoi (giu cho da tru san). Nguoi chua co hang diem => 0. 404 => `null`.
+  // Loi khac => 503/162001 - KHONG duoc hieu thanh "0 diem".
+  async lookupAccumulatedPoints(userId: string): Promise<number | null> {
+    try {
+      const { points } = await this.post<{ userId: string; points: number }>(
+        'internal/accumulated-points/lookup',
+        { userId },
+      );
+      return Number(points);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Buoc 7.7d: bon lenh GHI diem qua `postMoney` (goi lai mot lan; 4xx nem
+  // nguyen loi axios). shared-user chua co lookup theo khoa cho diem => hong
+  // hai lan la 503 "khong biet" (7.6); goi lai cung khoa sau do la `replayed`.
+  addAccumulatedPoints(
+    body: SharedAccumulatedPointMoveRequest,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/add',
+      body,
+    );
+  }
+
+  // Khoa MOI moi lan giu (`<service>:<orderSlug>:reserve:<seq>`). Khong gui
+  // `expiresAt` => shared-user dat 30 phut (QD11, gap doi 15 phut service tu
+  // xoa don PENDING).
+  reserveAccumulatedPoints(
+    body: SharedAccumulatedPointMoveRequest,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/reserve',
+      body,
+    );
+  }
+
+  // Hai lenh duoi nhan KHOA CUA LAN GIU; vi tu ghi `<khoa>:confirm` /
+  // `<khoa>:cancel` (lam hai lan = mot lan). 409 = giu cho khong con mo.
+  confirmAccumulatedPointsReservation(
+    reservationKey: string,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/confirm',
+      { transactionId: reservationKey },
+    );
+  }
+
+  cancelAccumulatedPointsReservation(
+    reservationKey: string,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/cancel-reservation',
+      { transactionId: reservationKey },
+    );
+  }
+
+  // Buoc 7.7d (QD17): nhom route "xem ho" doc tu shared-user SAU KHI service
+  // nay da kiem role (`@HasRoles`). Co `userId` => cua mot nguoi; khong co =>
+  // moi giao dich cua service nay (QD-T5). 400 cua shared-user (vd export qua
+  // so dong) => 400 kem cau cua no; loi khac => 503/162001.
+  queryPointTransactions<T>(
+    body: SharedPointTransactionViewRequest,
+  ): Promise<T> {
+    return this.readView<T>('internal/point-transactions/query', body);
+  }
+
+  analyzePointTransactions<T>(
+    body: SharedPointTransactionViewRequest,
+  ): Promise<T> {
+    return this.readView<T>('internal/point-transactions/analysis', body);
+  }
+
+  // `{ items, total }`, cu nhat truoc; ben goi dung file. Cham hon => 30 giay.
+  exportPointTransactions<T>(
+    body: SharedPointTransactionViewRequest,
+  ): Promise<T> {
+    return this.readView<T>('internal/point-transactions/export', body, 30000);
+  }
+
+  // So du lon nhat / nho nhat toan vi (man chinh sach xu).
+  analyzeBalances<T>(): Promise<T> {
+    return this.readView<T>('internal/balance/analysis', {});
+  }
+
+  private async readView<T>(
+    relativePath: string,
+    body: unknown,
+    timeoutMs?: number,
+  ): Promise<T> {
+    try {
+      return await this.post<T>(relativePath, body, timeoutMs);
+    } catch (error) {
+      const response = (
+        error as {
+          response?: { status?: number; data?: { message?: string } };
+        }
+      )?.response;
+      if (response?.status === 400) {
+        throw new BadRequestException(response.data?.message ?? 'Bad request');
+      }
+      this.toReadError(error);
+    }
   }
 
   // Dong so cai tim thay sau hai lan hong => tra loi nhu mot lan `replayed`.

@@ -150,6 +150,21 @@ export interface SharedMembershipCard {
 }
 
 // QD22.b - `user` du shape lookup de truyen thang vao `ensureLocalUsers`.
+// Buoc 7.6 (QD10): mot dong so cai vi cua CHINH service goi, tra bang khoa
+// idempotent qua `POST /internal/balance/lookup-transaction` (dung o 6.6).
+// `type` = 'in' | 'out'; `balance` = so du ngay sau dong do.
+export interface SharedBalanceTransaction {
+  transactionId: string;
+  userId: string;
+  type: string;
+  points: number;
+  balance: number;
+  objectType: string;
+  objectId: string;
+  objectSlug: string;
+  createdAt: string;
+}
+
 export interface SharedMembershipCardIssued {
   cardId: string;
   code: string;
@@ -553,6 +568,115 @@ export class SharedUserServiceClient {
       `internal/membership-cards/${id}/remove`,
       {},
     );
+  }
+
+  // Buoc 7.6 (QD10): dong so cai vi da ghi duoi khoa `transactionId`, hoac
+  // `null` khi chua co (404). shared-user chi tra loi khoa cua CHINH service
+  // goi - khoa mang tien to service khac cung ra 404. Moi loi khac => 503
+  // (`toReadError`). Dung trong `postMoney`; doi soat Z-8 (GD9) dung lai.
+  async lookupBalanceTransaction(
+    transactionId: string,
+  ): Promise<SharedBalanceTransaction | null> {
+    try {
+      return await this.post<SharedBalanceTransaction>(
+        'internal/balance/lookup-transaction',
+        { transactionId },
+      );
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  /**
+   * Buoc 7.6 (QD10) - lenh GHI tien / diem sang shared-user. CHUA AI GOI: buoc
+   * 7.7 doi tung cho goi vi / diem sang day.
+   *
+   * - Goi lai **dung mot lan** khi shared-user khong tra loi duoc: timeout,
+   *   mat mang (loi khong co `response`), hoac 5xx. Body giu nguyen => cung
+   *   khoa idempotent => lan goi lai vo hai (lan dau da ghi thi shared-user
+   *   tra `replayed: true`, khong ghi them). `post` ky HMAC lai voi timestamp
+   *   moi.
+   * - **Khong** goi lai 4xx: loi cua chinh request (thieu xu, sai khoa, sai
+   *   chu ky...), goi lai van hong. Nem nguyen loi axios - ben goi doc
+   *   `response.status` / `message` nhu moi ham GHI khac.
+   * - **Giu `timeout: 5000`** (mac dinh cua `post`): rut ngan chi de ra them
+   *   trang thai "da ghi hay chua?", ma mo ho ve tien dat hon cham ve tien.
+   * - Hong lan hai:
+   *   - co `fromLedger` (route vi `internal/balance/*`): hoi
+   *     `lookup-transaction` bang CHINH khoa de **phan dinh**:
+   *     - thay dong so cai => lenh DA GHI => tra `fromLedger(dong do)`;
+   *     - 404 => CHUA ghi => nem 503 (162001). Neu lenh dau van dang chay va
+   *       ghi muon hon, lan goi lai sau (job.recovery, doi soat Z-8) cung khoa
+   *       se thanh `replayed` - khong ghi hai lan;
+   *     - lookup cung hong => KHONG BIET => log loi kem khoa, nem 503.
+   *   - khong co `fromLedger` (route diem - shared-user chua co lookup theo
+   *     khoa cho diem): nem 503, ben goi coi nhu "khong biet".
+   *
+   * Quyet dinh nghiep vu sau do (chan chot don, bu tru Z-7...) la cua ben goi
+   * theo chinh sach 7.3 (QD6/QD7/QD8), khong nam o day.
+   */
+  private async postMoney<T>(
+    relativePath: string,
+    body: { transactionId: string },
+    fromLedger?: (transaction: SharedBalanceTransaction) => T,
+  ): Promise<T> {
+    const key = body.transactionId;
+    const describe = (error: unknown): string => {
+      const err = error as {
+        response?: { status?: number };
+        code?: string;
+        message?: string;
+      };
+      return `status=${err?.response?.status ?? '-'} code=${err?.code ?? '-'} ${err?.message ?? ''}`;
+    };
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        return await this.post<T>(relativePath, body);
+      } catch (error) {
+        const status = (error as { response?: { status?: number } })?.response
+          ?.status;
+        // Co response va < 500 => 4xx: loi cua request, khong goi lai.
+        if (status !== undefined && status < 500) throw error;
+        // Khong response (timeout ECONNABORTED, ECONNREFUSED, ECONNRESET...)
+        // hoac 5xx => shared-user khong tra loi duoc => goi lai mot lan.
+        this.logger.warn(
+          `shared-user money write attempt ${attempt}/2 failed: path=${relativePath} key=${key} ${describe(error)}`,
+        );
+      }
+    }
+
+    if (!fromLedger) {
+      this.logger.error(
+        `shared-user money write failed twice, no lookup by key for this route - outcome UNKNOWN: path=${relativePath} key=${key}`,
+      );
+      throw new SharedUserUnavailableException();
+    }
+
+    let transaction: SharedBalanceTransaction | null;
+    try {
+      transaction = await this.lookupBalanceTransaction(key);
+    } catch (error) {
+      this.logger.error(
+        `shared-user money write failed twice and lookup-transaction failed too - outcome UNKNOWN, reconcile by key: path=${relativePath} key=${key} ${describe(error)}`,
+      );
+      throw new SharedUserUnavailableException();
+    }
+    if (!transaction) {
+      this.logger.error(
+        `shared-user money write failed twice, lookup-transaction says NOT written yet (a write held up at shared-user can still land after this lookup - reconcile by key): path=${relativePath} key=${key}`,
+      );
+      throw new SharedUserUnavailableException();
+    }
+    this.logger.warn(
+      `shared-user money write failed twice but lookup-transaction found it WRITTEN: path=${relativePath} key=${key} balance=${transaction.balance}`,
+    );
+    return fromLedger(transaction);
   }
 
   // Moi path, ke ca /internal/*, deu mang tien to api/${version} - phai

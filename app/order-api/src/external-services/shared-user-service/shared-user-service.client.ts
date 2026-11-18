@@ -570,6 +570,27 @@ export class SharedUserServiceClient {
     );
   }
 
+  // Buoc 7.7a (trend-api.md 7.4(a)): so du xu cua MOT nguoi o vi shared-user.
+  // Nguoi chua co hang vi => 0 (shared-user tu tra 0). 404 = shared-user
+  // khong co user nay => `null`, ben goi tu quyet. Loi khac => 503/162001
+  // (`toReadError`) - KHONG duoc hieu thanh "so du 0".
+  async lookupBalancePoints(userId: string): Promise<number | null> {
+    try {
+      const { points } = await this.post<{ userId: string; points: number }>(
+        'internal/balance/lookup',
+        { userId },
+      );
+      return Number(points);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
   // Buoc 7.6 (QD10): dong so cai vi da ghi duoi khoa `transactionId`, hoac
   // `null` khi chua co (404). shared-user chi tra loi khoa cua CHINH service
   // goi - khoa mang tien to service khac cung ra 404. Moi loi khac => 503

@@ -1,17 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { PointTransaction } from './entities/point-transaction.entity';
 import { Repository } from 'typeorm';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { Logger } from 'winston';
-import { InjectMapper } from '@automapper/nestjs';
-import { Mapper } from '@automapper/core';
 import { AnalysisPointTransactionResponseDto, PointTransactionResponseDto } from './dto/point-transaction-response.dto';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
 import { PointTransactionException } from './point-transaction.exception';
 import { PointTransactionValidation } from './point-transaction.validation';
 import { FindAllPointTransactionDto } from './dto/find-all-point-transaction.dto';
-import { CreatePointTransactionDto } from './dto/create-point-transaction.dto';
 import {
   PointTransactionObjectTypeEnum,
   PointTransactionTypeEnum,
@@ -27,14 +23,8 @@ import {
 import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
 import { CardOrder } from '../card-order/entities/card-order.entity';
-import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
 import { SharedUserRefService } from 'src/shared/services/shared-user-ref.service';
-import {
-  assignNestedUserFlags,
-  batchLookupSharedUserIdentities,
-} from 'src/user/user.helper';
 import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
-import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import _ from 'lodash';
 import { SharedExportFileService } from 'src/shared/services/shared-export-file.service';
 import { ExcelConfig } from 'src/shared/interfaces/commons/excel-config.interface';
@@ -76,12 +66,9 @@ export class PointTransactionService {
     private gcRepository: Repository<GiftCard>,
     @Inject(WINSTON_MODULE_NEST_PROVIDER)
     private readonly logger: Logger,
-    @InjectMapper()
-    private readonly mapper: Mapper,
     private readonly pdfService: PdfService,
-    private readonly sharedPtService: SharedPointTransactionService,
     // Buoc 2.13 — dich `userSlug` cua DTO client-facing sang `sharedUserId`
-    // ngay tai bien gioi. Xem ghi chu trong `create`.
+    // ngay tai bien gioi (bo loc xem ho, export mot khach).
     private readonly sharedUserRefService: SharedUserRefService,
     private readonly sharedExportFileService: SharedExportFileService,
     // Buoc 3.4 - `user.isActive` lay tu shared-user; buoc 7.7d - nhom "xem
@@ -353,161 +340,6 @@ export class PointTransactionService {
     return objectRef;
   }
 
-  async create(req: CreatePointTransactionDto) {
-    // Day la BIEN GIOI client-facing (body cua `POST /point-transaction`):
-    // `req.userSlug` phai giu nguyen theo muc 1.4, nhung service dung chung
-    // xung ten bang `sharedUserId` tu buoc 2.13. Dich o dung day - mot cho,
-    // ngay sat bien - thay vi de khoa slug di sau vao cum vi.
-    //
-    // Dich hong thi phai ra DUNG ma cu: truoc 2.13 `userSlug` la di thang toi
-    // `findOne({ slug })` trong service dung chung roi nem `USER_NOT_FOUND`
-    // => **400 / 158508**. De helper nem `Error` tran thi route tra **500** —
-    // do song 04/11/2026 thay dung nhu vay.
-    //
-    // Doi 09/11/2026 (nguoi dung chot): gia tri khong hop le thi helper **nem
-    // thang**, khong ai phai `try/catch` va cung khong dung lop loi rieng -
-    // `toSharedUserId` nem `UserException(UserValidation.USER_NOT_FOUND)`, tuc
-    // **400 / 137000**, ma san co cua module `user`.
-    //
-    // ⚠ Hop dong route doi: ma cu cua duong nay la **158508**
-    // (`PointTransactionValidation.USER_NOT_FOUND`), nay la **137000**. Van la
-    // HTTP 400 va cung cau "User not found"; khac la **137000 CO ban dich o ca
-    // hai UI** (`toast.userNotFound`) con 158508 thi khong. Doi co chu dich,
-    // ghi o than buoc 2.13 (muc 1.4 doi tuong minh, khong am tham).
-    //
-    // Hai duong hong con lai cua helper (slug rong, thieu `sharedUserId`) nay
-    // cung ra 400 / 137000 kem log muc `error` - chung thuong la loi lap trinh,
-    // nhung mot `Error` tran thi khong ai bat, chi thanh 500 khong ma loi.
-    const { userSlug, ...rest } = req;
-    const sharedUserId = await this.sharedUserRefService.toSharedUserId(userSlug);
-    // Buoc 3.4 - tra `isActive` TRUOC khi ghi: shared-user hong thi 503 ngay
-    // day, khi chua ghi gi. Tra SAU khi ghi thi client nhan 503 cho mot giao
-    // dich DA tao - goi lai la cong diem hai lan.
-    const userIdentityById = await batchLookupSharedUserIdentities(
-      [sharedUserId],
-      this.sharedUserServiceClient,
-      this.logger,
-      `${PointTransactionService.name}.${this.create.name}`,
-    );
-    const pt = await this.sharedPtService.create({
-      ...rest,
-      sharedUserId,
-    } satisfies CreatePointTransactionPayload);
-    const response = this.mapper.map(
-      pt,
-      PointTransaction,
-      PointTransactionResponseDto,
-    );
-    assignNestedUserFlags([[pt.user, response.user]], userIdentityById);
-    return response;
-    // const context = `${PointTransaction.name}.${this.create.name}`;
-    // this.logger.log(
-    //   `Create point transaction req; ${JSON.stringify(req)}`,
-    //   context,
-    // );
-
-    // const payload = this.mapper.map(
-    //   req,
-    //   CreatePointTransactionDto,
-    //   PointTransaction,
-    // );
-
-    // if (
-    //   payload.type === PointTransactionTypeEnum.IN &&
-    //   payload.objectType === PointTransactionObjectTypeEnum.ORDER
-    // ) {
-    //   throw new PointTransactionException(
-    //     PointTransactionValidation.INVALID_IN_ORDER_TRANSACTION,
-    //   );
-    // }
-
-    // if (
-    //   payload.type === PointTransactionTypeEnum.OUT &&
-    //   payload.objectType === PointTransactionObjectTypeEnum.GIFT_CARD
-    // ) {
-    //   throw new PointTransactionException(
-    //     PointTransactionValidation.INVALID_OUT_ORDER_TRANSACTION,
-    //   );
-    // }
-
-    // if (
-    //   payload.type === PointTransactionTypeEnum.OUT &&
-    //   payload.objectType === PointTransactionObjectTypeEnum.CARD_ORDER
-    // ) {
-    //   throw new PointTransactionException(
-    //     PointTransactionValidation.INVALID_OUT_CARD_ORDER_TRANSACTION,
-    //   );
-    // }
-
-    // let objectRef: Order | GiftCard | CardOrder = null;
-
-    // switch (payload.objectType) {
-    //   case PointTransactionObjectTypeEnum.ORDER:
-    //     objectRef = await this.orderRepository.findOne({
-    //       where: { slug: payload.objectSlug },
-    //     });
-    //     break;
-    //   case PointTransactionObjectTypeEnum.GIFT_CARD:
-    //     objectRef = await this.gcRepository.findOne({
-    //       where: { slug: payload.objectSlug },
-    //     });
-    //     break;
-    //   case PointTransactionObjectTypeEnum.CARD_ORDER:
-    //     objectRef = await this.coRepository.findOne({
-    //       where: { slug: payload.objectSlug },
-    //     });
-    //     break;
-    //   default:
-    //     throw new PointTransactionException(
-    //       PointTransactionValidation.OBJECT_TYPE_NOT_FOUND,
-    //     );
-    // }
-
-    // if (!objectRef)
-    //   throw new PointTransactionException(
-    //     PointTransactionValidation.OBJECT_TYPE_NOT_FOUND,
-    //   );
-
-    // const user = await this.userRepository.findOne({
-    //   where: {
-    //     slug: payload.userSlug,
-    //   },
-    // });
-
-    // if (!user)
-    //   throw new PointTransactionException(
-    //     PointTransactionValidation.USER_NOT_FOUND,
-    //   );
-
-    // Object.assign(payload, {
-    //   objectId: objectRef.id,
-    //   userId: user.id,
-    //   user: user,
-    // } as Partial<PointTransaction>);
-
-    // const pt = await this.transactionService.execute<PointTransaction>(
-    //   async (manager) => {
-    //     return manager.save(payload);
-    //   },
-    //   (res) =>
-    //     this.logger.log(
-    //       `Point transaction created: ${JSON.stringify(res)}`,
-    //       context,
-    //     ),
-    //   (err) => {
-    //     this.logger.error(
-    //       `Error when creating point transaction: ${err.message}`,
-    //       err.stack,
-    //       context,
-    //     );
-    //     throw new PointTransactionException(
-    //       PointTransactionValidation.ERROR_WHEN_CREATE_POINT_TRANSACTION,
-    //     );
-    //   },
-    // );
-    // return this.mapper.map(pt, PointTransaction, PointTransactionResponseDto);
-  }
-
   // Buoc 7.7d (QD17): danh sach giao dich xu "xem ho" (mot khach khi co
   // `userSlug`, khong thi toan bo giao dich cua service nay), doc
   // `/internal/point-transactions/query`. Dong mang them `service` (QD-T5);
@@ -529,13 +361,5 @@ export class PointTransactionService {
       page,
       'statistics',
     ) as AppPaginatedResponseDto<PointTransactionViewRow>;
-  }
-
-  // Route xoa o 7.9 (nhanh tu xem). Toi luc do doc shared-user nhu bien nhan.
-  async findOne(slug: string) {
-    const context = `${PointTransactionService.name}.${this.findOne.name}`;
-    this.logger.log(`Find point transaction: ${JSON.stringify(slug)}`, context);
-
-    return await this.findViewRowBySlug(slug);
   }
 }

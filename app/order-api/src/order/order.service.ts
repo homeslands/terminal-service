@@ -769,6 +769,29 @@ export class OrderService {
     const ownerIdentity = await this.userActiveChecker.assertActive(owner);
     checkUserRequirement(ownerIdentity?.userRequirements);
 
+    // Buoc 7.5b (`issuses/order-owner-change-keeps-point-reservation.md`): doi
+    // chu don thi HUY giu cho diem cua chu CU truoc. Khong huy thi luc chot don
+    // `confirmPointsUsage` (tim giu cho theo don) tru diem chu cu, con
+    // `addPointsForOrder` cong diem cho chu moi.
+    // - Hoan `subtotal` giong route huy giu cho (`cancelReservation`): luc ap
+    //   diem, giu cho da tru so diem do khoi `subtotal`.
+    // - Chi lam khi chu THAT SU doi: chon lai dung chu cu khong duoc lam mat
+    //   diem khach vua ap.
+    // - Khong cung transaction voi lenh luu chu moi ben duoi (`handleCancelReservation`
+    //   ghi bang repository rieng; tu 7.7d la lenh goi sang shared-user). Luu
+    //   hong thi giu cho da huy ma don con `accumulatedPointsToUse`; doi chu lai
+    //   lan nua se lanh (khong con giu cho de huy, chi hoan `subtotal`).
+    if (order.owner?.id !== owner.id) {
+      await this.accumulatedPointService.handleCancelReservation(
+        orderRef(order.slug),
+        null,
+      );
+      if (order.accumulatedPointsToUse > 0) {
+        order.subtotal += order.accumulatedPointsToUse;
+        order.accumulatedPointsToUse = 0;
+      }
+    }
+
     const previousVoucher = order.voucher;
     if (previousVoucher) {
       if (

@@ -4,8 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { signInternalRequest } from 'src/common/utils/internal-signature.util';
 import { SharedUserUnavailableException } from './shared-user-service.exception';
+import { UserException } from 'src/user/user.exception';
+import { UserValidation } from 'src/user/user.validation';
 import {
   INTERNAL_BATCH_LOOKUP_MAX,
+  INTERNAL_SEARCH_BY_PHONENUMBER_MAX,
   INTERNAL_LIST_RECENT_MAX_PAGES,
   INTERNAL_LIST_RECENT_PAGE_SIZE,
   INTERNAL_SERVICE_HEADER,
@@ -297,6 +300,41 @@ export class SharedUserServiceClient {
       `internal/users/${id}/update-identity`,
       data,
     );
+  }
+
+  // QD4 (buoc 7.1) - mang `id` cua moi nguoi co SDT CHUA chuoi `fragment`
+  // (khop chuoi con o shared-user), de loc `sharedUserId IN (...)` thay cho
+  // `Like` tren cot SDT cuc bo (cot nay bi drop o giai doan 8).
+  //
+  // CHI DE LOC danh sach - khong dung thay `lookupByPhonenumber` (khop
+  // tuyet doi) o duong ghi nao.
+  //
+  // - Vuot tran => shared-user tra 400 ma 137007; nem lai
+  //   `PHONENUMBER_SEARCH_TOO_BROAD` (400, cung ma) de UI bao "tim hep lai",
+  //   khong bao "khong co du lieu".
+  // - Loi khac (mang, 5xx, chu ky) => 503 qua `toReadError` (fail-closed: day
+  //   la bo loc chinh cua response, roi ve cot cuc bo la sai lech D9).
+  async searchIdsByPhonenumber(fragment: string): Promise<string[]> {
+    try {
+      return await this.post<string[]>('internal/users/search-by-phonenumber', {
+        phonenumber: fragment,
+        limit: INTERNAL_SEARCH_BY_PHONENUMBER_MAX,
+      });
+    } catch (error) {
+      const response = (
+        error as {
+          response?: { status?: number; data?: { statusCode?: number } };
+        }
+      )?.response;
+      if (
+        response?.status === 400 &&
+        response?.data?.statusCode ===
+          UserValidation.PHONENUMBER_SEARCH_TOO_BROAD.code
+      ) {
+        throw new UserException(UserValidation.PHONENUMBER_SEARCH_TOO_BROAD);
+      }
+      this.toReadError(error);
+    }
   }
 
   // Batch cua lookupById - dung khi terminal can ghep identity vao ca 1 trang

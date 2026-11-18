@@ -1,13 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  FindManyOptions,
-  FindOptionsWhere,
-  In,
-  Like,
-  Repository,
-} from 'typeorm';
+import { FindManyOptions, FindOptionsWhere, In, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { User } from './user.entity';
@@ -612,15 +606,13 @@ export class UserService {
         // cua QD19 CHI TAO hang thieu, KHONG cap nhat hang cu. Khong co lop nao
         // keo cot nay ve - no lech cho toi khi GD8 drop cot.
         //
-        // Hau qua thuc te, chi MOT cho: TIM KHACH THEO SDT
-        // (`GET /user?phonenumber=` loc `Like` tren cot guong) se khong ra nguoi
-        // nay khi tra bang so MOI. Lop 1b cua QD19 phat hien duoc ca nay nhung
-        // co y khong sua ("Local phonenumber ... is stale, lookup-on-miss cannot
-        // surface it").
-        // Moi cho khac KHONG anh huong: response nao cung ghep identity tu
-        // shared-user (`mergeSharedUserIdentity`) nen so hien ra luon dung.
+        // Hau qua thuc te: tu buoc 7.1 KHONG con cho nao doc cot nay de tim
+        // (`GET /user?phonenumber=` khop SDT o shared-user roi loc
+        // `sharedUserId IN`). Truoc 7.1 o tim SDT tra bang so MOI se truot.
+        // Response nao cung ghep identity tu shared-user
+        // (`mergeSharedUserIdentity`) nen so hien ra luon dung.
         this.logger.error(
-          `[MIRROR-LAG] local phonenumber mirror NOT written for ${user.slug} (shared-user already stored ${updated?.phonenumber}); local phone search will miss this customer until stage 8: ${error?.message}`,
+          `[MIRROR-LAG] local phonenumber mirror NOT written for ${user.slug} (shared-user already stored ${updated?.phonenumber}); search is unaffected since stage 7.1, column is dropped in stage 8: ${error?.message}`,
           error?.stack,
           context,
         );
@@ -1093,19 +1085,11 @@ export class UserService {
       )
         return false;
 
-      const local =
-        await this.userProvisioningService.ensureLocalUser(sharedUser);
+      await this.userProvisioningService.ensureLocalUser(sharedUser);
 
-      // Hang cuc bo DA CO tu truoc nhung SDT cuc bo khac SDT that (khach doi
-      // so ben shared-user) => truy van lai van rong. Khong tu sua o day (day
-      // la duong doc), chi keu len de con dieu tra.
-      if (local.phonenumber !== sharedUser.phonenumber) {
-        this.logger.warn(
-          `Local phonenumber of sharedUserId=${sharedUser.id} is stale, lookup-on-miss cannot surface it`,
-          context,
-        );
-        return false;
-      }
+      // Tu buoc 7.1 truy van lai loc theo `sharedUserId IN (...)` (id khop o
+      // shared-user), khong theo cot SDT cuc bo - nen hang cuc bo co SDT cu
+      // (khach doi so ben shared-user) van hien ra, khong can so SDT o day.
 
       this.logger.log(
         `Lookup-on-miss ensured local user for sharedUserId=${sharedUser.id}`,
@@ -1226,8 +1210,23 @@ export class UserService {
     const whereOptions: FindOptionsWhere<User> = {};
     if (query.slug) whereOptions.slug = query.slug;
     if (query.branch) whereOptions.branch = { slug: query.branch };
-    if (query.phonenumber)
-      whereOptions.phonenumber = Like(`%${query.phonenumber}%`);
+    // QD4 (buoc 7.1) - o tim SDT khop CHUOI CON o `shared-user` roi loc
+    // `sharedUserId IN (...)`, khong `Like` tren cot SDT cuc bo nua (cot do
+    // bi drop o giai doan 8). Khop qua tran => 400 ma 137007 "tim hep lai";
+    // shared-user khong tra loi => 503 (fail-closed, day la bo loc chinh).
+    //
+    // Khong ai khop => trang rong ngay: lop 1b ben duoi tra KHOP TUYET DOI,
+    // ma nguoi khop tuyet doi thi da nam trong ket qua khop chuoi con.
+    const phonenumberFragment = query.phonenumber?.trim();
+    let phonenumberMatchedIds: string[] | null = null;
+    if (phonenumberFragment) {
+      phonenumberMatchedIds =
+        await this.sharedUserServiceClient.searchIdsByPhonenumber(
+          phonenumberFragment,
+        );
+      if (!phonenumberMatchedIds.length) return this.emptyUserPage(query);
+      whereOptions.sharedUserId = In(phonenumberMatchedIds);
+    }
     if (!_.isEmpty(query.role))
       whereOptions.role = {
         name: In(query.role),
@@ -1249,6 +1248,10 @@ export class UserService {
           query.membershipCard,
         );
       if (!card?.userId) return this.emptyUserPage(query);
+      // Co ca o SDT lan ma the => AND nhu ban `Like` cu: chu the phai nam
+      // trong tap khop SDT, khong thi trang rong (khong de the ghi de bo loc).
+      if (phonenumberMatchedIds && !phonenumberMatchedIds.includes(card.userId))
+        return this.emptyUserPage(query);
       await this.provisionLocalUserForSharedId(card.userId);
       whereOptions.sharedUserId = card.userId;
     }

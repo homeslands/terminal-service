@@ -4,8 +4,8 @@ import { PointTransaction } from './entities/point-transaction.entity';
 import {
   Between,
   FindOptionsWhere,
+  In,
   IsNull,
-  Like,
   MoreThan,
   Raw,
   Repository,
@@ -86,7 +86,7 @@ export class PointTransactionService {
     const { sort } = req;
 
     const whereOpts: FindOptionsWhere<PointTransaction> =
-      this.buildWhereOptions(req);
+      await this.buildWhereOptions(req);
 
     const sortOpts = createSortOptions<PointTransaction>(sort);
 
@@ -498,9 +498,9 @@ export class PointTransactionService {
     // return this.mapper.map(pt, PointTransaction, PointTransactionResponseDto);
   }
 
-  private buildWhereOptions(
+  private async buildWhereOptions(
     req: FindAllPointTransactionDto,
-  ): FindOptionsWhere<PointTransaction> {
+  ): Promise<FindOptionsWhere<PointTransaction>> {
     const { userSlug } = req;
 
     const whereOpts: FindOptionsWhere<PointTransaction> = {};
@@ -526,11 +526,25 @@ export class PointTransactionService {
     }
 
     if (req.k) {
+      // QD4 (buoc 7.1) - ve SDT: khop chuoi con o `shared-user` roi loc
+      // `sharedUserId IN (...)`, khong `Like` tren cot SDT cuc bo (drop o GD8).
+      // Chi hoi khi tu khoa co chu so - SDT chi gom chu so, go ten thi khong
+      // ton mot luot goi. Vuot tran => 400 ma 137007 "tim hep lai"; shared-user
+      // khong tra loi => 503.
+      //
+      // Ve TEN van doc cot cuc bo O BUOC NAY: route `search-by-phonenumber`
+      // chi khop SDT, va o tim cua man nay ghi "ten hoac SDT". Ca nhom route
+      // "xem ho" doi nguon sang `/internal/point-transactions/*` o 7.7d (ben
+      // do tu khop ca ten lan SDT tren bang user cua shared-user) - luc do
+      // ham nay di cung.
+      const keyword = req.k.trim();
+      const phoneMatchedIds = /\d/.test(keyword)
+        ? await this.sharedUserServiceClient.searchIdsByPhonenumber(keyword)
+        : [];
       userWhere = [
-        {
-          ...userWhere,
-          phonenumber: Like(`%${req.k}%`)
-        },
+        ...(phoneMatchedIds.length
+          ? [{ ...userWhere, sharedUserId: In(phoneMatchedIds) }]
+          : []),
         {
           ...userWhere,
           firstName: Raw(
@@ -559,7 +573,7 @@ export class PointTransactionService {
     const { page, size, sort } = req;
 
     const whereOpts: FindOptionsWhere<PointTransaction> =
-      this.buildWhereOptions(req);
+      await this.buildWhereOptions(req);
 
     const sortOpts = createSortOptions<PointTransaction>(sort);
 

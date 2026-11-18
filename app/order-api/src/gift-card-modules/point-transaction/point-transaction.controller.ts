@@ -5,8 +5,6 @@ import {
   HttpStatus,
   Query,
   ValidationPipe,
-  Post,
-  Body,
   StreamableFile,
   Logger,
   Inject,
@@ -20,7 +18,6 @@ import {
 } from './dto/point-transaction-response.dto';
 import { AppPaginatedResponseDto, AppResponseDto } from 'src/app/app.dto';
 import { FindAllPointTransactionDto } from './dto/find-all-point-transaction.dto';
-import { CreatePointTransactionDto } from './dto/create-point-transaction.dto';
 import {
   ExportAllPointTransactionDto,
   ExportAllSystemPointTransactionDto,
@@ -38,7 +35,11 @@ import { RoleEnum } from 'src/role/role.enum';
 // - xem mot khach (danh sach, mot giao dich): nhan vien + Cashier + Telesale;
 // - moi path co `analysis` / `export`: Manager, Admin, SuperAdmin.
 // Role viet TUONG MINH tung `RoleEnum.X` (ca kiem tinh doc chu trong
-// decorator). `POST /` khong gac o day - bi xoa o 7.9.
+// decorator).
+// Buoc 7.9: xoa `POST /` (route ghi client-facing tao thang mot dong giao
+// dich xu, khong kem lenh cong/tru co khoa - muc 1.8 cam; khong UI nao goi)
+// va `GET /:slug` (khong UI nao goi; bien nhan mot giao dich da co
+// `GET /:slug/export`). Khong dung lai o shared-user.
 @RestController({
   path: 'point-transaction',
   tags: ['Point Transaction Resources'],
@@ -100,25 +101,6 @@ export class PointTransactionController {
     });
   }
 
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create the point transaction' })
-  @ApiResponseWithType({
-    status: HttpStatus.OK,
-    type: PointTransactionResponseDto,
-  })
-  async create(
-    @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    req: CreatePointTransactionDto,
-  ) {
-    const result = await this.pointTransactionService.create(req);
-    return {
-      statusCode: HttpStatus.OK,
-      timestamp: new Date().toISOString(),
-      result,
-    } as AppResponseDto<PointTransactionResponseDto>;
-  }
-
   @GetAnalyzePointTransactionApi({ path: 'analysis' })
   @HasRoles(RoleEnum.Manager, RoleEnum.Admin, RoleEnum.SuperAdmin)
   async analyze(
@@ -165,29 +147,5 @@ export class PointTransactionController {
       timestamp: new Date().toISOString(),
       result,
     } as AppResponseDto<AppPaginatedResponseDto<PointTransactionResponseDto>>;
-  }
-
-  @Get(':slug')
-  @HasRoles(
-    RoleEnum.Staff,
-    RoleEnum.Cashier,
-    RoleEnum.Telesale,
-    RoleEnum.Manager,
-    RoleEnum.Admin,
-    RoleEnum.SuperAdmin,
-  )
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Retrieve the point transaction' })
-  @ApiResponseWithType({
-    status: HttpStatus.OK,
-    type: PointTransactionResponseDto,
-  })
-  async findOne(@Param('slug') slug: string) {
-    const result = await this.pointTransactionService.findOne(slug);
-    return {
-      statusCode: HttpStatus.OK,
-      timestamp: new Date().toISOString(),
-      result,
-    } as AppResponseDto<PointTransactionResponseDto>;
   }
 }

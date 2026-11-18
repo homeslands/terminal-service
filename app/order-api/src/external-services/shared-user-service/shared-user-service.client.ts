@@ -165,6 +165,32 @@ export interface SharedBalanceTransaction {
   createdAt: string;
 }
 
+// Buoc 7.7b/c: body cua `internal/balance/credit` / `debit` (shared-user
+// `CreditBalanceRequestDto`). `transactionId` = khoa idempotent
+// (`shared/constants/service-ref.constant.ts`). Dong so cai di CUNG lenh nay
+// (`objectType` / `objectId` / `objectSlug` / `desc`) - khong con lenh tao
+// dong `point_transaction` rieng. `points`: so nguyen >= 1.
+export interface SharedBalanceMoveRequest {
+  userId: string;
+  points: number;
+  transactionId: string;
+  objectType: string;
+  objectId: string;
+  objectSlug: string;
+  desc?: string;
+}
+
+// Tra loi cua credit / debit / release: so du SAU giao dich (dung luon, khong
+// doc lai). `replayed` = khoa da ghi tu truoc, lan nay khong ghi them.
+export interface SharedBalanceMove {
+  transactionId: string;
+  userId: string;
+  points: number;
+  balance: number;
+  replayed: boolean;
+  createdAt: string;
+}
+
 export interface SharedMembershipCardIssued {
   cardId: string;
   code: string;
@@ -591,6 +617,33 @@ export class SharedUserServiceClient {
     }
   }
 
+  // Buoc 7.7b (trend-api.md 7.4(b)): cong xu vao vi shared-user, idempotent
+  // theo `transactionId` (goi lai cung khoa => `replayed`, khong cong them).
+  // Hong hai lan => phan dinh bang lookup-transaction (`postMoney`). 4xx (sai
+  // body, user la, khoa da dung cho giao dich khac - 409) nem nguyen loi
+  // axios: loi lap trinh, goi lai van hong.
+  creditBalance(body: SharedBalanceMoveRequest): Promise<SharedBalanceMove> {
+    return this.postMoney<SharedBalanceMove>(
+      'internal/balance/credit',
+      body,
+      (transaction) => this.moveFromLedger(transaction),
+    );
+  }
+
+  // Dong so cai tim thay sau hai lan hong => tra loi nhu mot lan `replayed`.
+  private moveFromLedger(
+    transaction: SharedBalanceTransaction,
+  ): SharedBalanceMove {
+    return {
+      transactionId: transaction.transactionId,
+      userId: transaction.userId,
+      points: transaction.points,
+      balance: transaction.balance,
+      replayed: true,
+      createdAt: transaction.createdAt,
+    };
+  }
+
   // Buoc 7.6 (QD10): dong so cai vi da ghi duoi khoa `transactionId`, hoac
   // `null` khi chua co (404). shared-user chi tra loi khoa cua CHINH service
   // goi - khoa mang tien to service khac cung ra 404. Moi loi khac => 503
@@ -663,7 +716,14 @@ export class SharedUserServiceClient {
         const status = (error as { response?: { status?: number } })?.response
           ?.status;
         // Co response va < 500 => 4xx: loi cua request, khong goi lai.
-        if (status !== undefined && status < 500) throw error;
+        // Buoc 7.7b: ghi lai kem khoa truoc khi nem (4xx cua lenh tien la
+        // dau vet doi soat; vd 409 = khoa da dung cho giao dich khac).
+        if (status !== undefined && status < 500) {
+          this.logger.warn(
+            `shared-user money write refused (not retried): path=${relativePath} key=${key} ${describe(error)}`,
+          );
+          throw error;
+        }
         // Khong response (timeout ECONNABORTED, ECONNREFUSED, ECONNRESET...)
         // hoac 5xx => shared-user khong tra loi duoc => goi lai mot lan.
         this.logger.warn(

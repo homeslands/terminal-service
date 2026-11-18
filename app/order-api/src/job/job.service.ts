@@ -23,6 +23,7 @@ import { assertUserKeyLoaded } from 'src/user/user.constant';
 import { InvoiceAction } from 'src/invoice/invoice.constants';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
+import { calculateAccumulatedPoints } from 'src/accumulated-point/accumulated-point.utils';
 import {
   orderOpIdempotencyKey,
   orderRef,
@@ -264,11 +265,20 @@ export class JobService {
           // sai khoa o day thi job van COMPLETED, don van PAID, chi la khong
           // ai duoc cong diem - **khong co mau do nao**. Kiem bang cach doc
           // `accumulated_point_tbl` cua dung nguoi do, dung doc ma thoat.
+          // Buoc 7.7d (QD-T4): ti le cua service nay, phep nhan o CHO GOI;
+          // `/add` nhan so diem da tinh (`orderTotal` bo khoi IAddPointsDto).
+          const pointsPercentage = parseInt(
+            await this.accumulatedPointService.getAccumulatedPointsPercentage(),
+          );
           await this.accumulatedPointService.addPointsForOrder({
             sharedUserId: order.owner?.sharedUserId,
             orderId: order.id,
-            points: order.payment?.amount,
-            orderTotal: order.subtotal - order.deliveryFee,
+            orderSlug: order.slug,
+            points: calculateAccumulatedPoints(
+              order.subtotal - order.deliveryFee,
+              pointsPercentage,
+            ),
+            pointsPercentage,
           });
           this.logger.log(
             `Added accumulated points for order ${order.slug}`,

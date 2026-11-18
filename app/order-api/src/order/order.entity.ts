@@ -127,6 +127,18 @@ export class Order extends Base {
   @Column({ name: 'accumulated_points_to_use_column', default: 0 })
   accumulatedPointsToUse: number;
 
+  // Buoc 7.7d (trend-api.md 7.4(d)): khoa cua lan giu diem CUOI CUNG
+  // (`<service>:<slug>:reserve:<seq>`) - shared-user xac nhan / huy giu cho
+  // theo khoa nay. Giu cho dang mo khi `accumulatedPointsToUse > 0`; khoa
+  // khong bi xoa khi huy (xem `AccumulatedPointService.openReservationKeyOf`).
+  @Column({
+    name: 'points_reservation_key_column',
+    type: 'varchar',
+    length: 191,
+    nullable: true,
+  })
+  pointsReservationKey?: string | null;
+
   @OneToOne(() => Address, (address) => address.order, {
     nullable: true,
     cascade: ['insert', 'update', 'remove'],

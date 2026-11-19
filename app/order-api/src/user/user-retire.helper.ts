@@ -2,7 +2,9 @@ import { randomBytes, randomUUID } from 'crypto';
 import { EntityManager } from 'typeorm';
 import { User } from './user.entity';
 import {
+  readLocalIdentityOf,
   readLocalIsActiveOf,
+  writeLocalIdentity,
   writeLocalIsActive,
 } from './user-legacy-column.helper';
 
@@ -29,6 +31,9 @@ import {
  * `_deprecated_is_active_column`) KHONG con la field cua entity: doc/ghi qua
  * `user-legacy-column.helper.ts`, SQL tho do ten cot - tep nay chay tren
  * staging/prod SAU moi migration (Phu luc D, quy dinh 2).
+ *
+ * Buoc 8.8: chin cot identity cung roi entity - doc / ghi qua
+ * `readLocalIdentityOf` / `writeLocalIdentity` cua cung helper.
  */
 
 export const RETIRED_PREFIX = 'retired-';
@@ -60,14 +65,16 @@ export interface UserBackupMeta {
 // Chep gia tri HIEN TAI cua `user` vao bang sao luu. Goi TRUOC moi lenh ghi de
 // identity, trong cung `manager` (cung transaction) voi lenh ghi do.
 //
-// Trang thai khoa doc tu DB (khong tu object `user`): entity khong con giu no,
-// va doc trong cung transaction thi dung gia tri ngay truoc lenh ghi de.
+// Trang thai khoa va identity (buoc 8.8) doc tu DB (khong tu object `user`):
+// entity khong con giu chung, va doc trong cung transaction thi dung gia tri
+// ngay truoc lenh ghi de.
 export async function backupUser(
   manager: EntityManager,
   user: User,
   meta: UserBackupMeta,
 ): Promise<void> {
   const oldLocalActive = await readLocalIsActiveOf(manager, user.id);
+  const old = await readLocalIdentityOf(manager, user.id);
   await manager.query(
     `INSERT INTO \`user_retire_backup_tbl\` (
       \`id_column\`, \`run_id_column\`, \`action_column\`, \`reason_column\`,
@@ -85,15 +92,15 @@ export async function backupUser(
       user.id,
       user.slug ?? null,
       user.role?.name ?? null,
-      user.phonenumber ?? null,
+      old?.phonenumber ?? null,
       user.sharedUserId ?? null,
-      user.firstName ?? null,
-      user.lastName ?? null,
-      user.email ?? null,
-      user.dob ?? null,
-      user.dobDM ?? null,
-      user.address ?? null,
-      user.image ?? null,
+      old?.firstName ?? null,
+      old?.lastName ?? null,
+      old?.email ?? null,
+      old?.dob ?? null,
+      old?.dobDM ?? null,
+      old?.address ?? null,
+      old?.image ?? null,
       oldLocalActive === null ? null : oldLocalActive ? 1 : 0,
     ],
   );
@@ -112,9 +119,8 @@ export async function retireLocalUser(
 ): Promise<User> {
   return manager.transaction(async (tx) => {
     await backupUser(tx, user, { ...meta, action: 'RETIRE' });
-    Object.assign(user, {
+    const retired = {
       phonenumber: generateRetiredPhonenumber(),
-      sharedUserId: randomUUID(),
       firstName: null,
       lastName: null,
       dob: null,
@@ -122,8 +128,12 @@ export async function retireLocalUser(
       email: null,
       address: null,
       image: null,
-    });
+    };
+    // `sharedUserId` qua entity; identity cuc bo bang SQL tho (buoc 8.8).
+    // Gan ca len object de ben goi doc lai thay dung gia tri vua ghi.
+    Object.assign(user, retired, { sharedUserId: randomUUID() });
     const saved = await tx.save(User, user);
+    await writeLocalIdentity(tx, user.id, retired);
     await writeLocalIsActive(tx, user.id, false);
     return saved;
   });

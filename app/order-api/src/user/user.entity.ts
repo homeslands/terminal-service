@@ -4,7 +4,6 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
-  OneToOne,
 } from 'typeorm';
 import { Base } from 'src/app/base.entity';
 import { AutoMap } from '@automapper/classes';
@@ -13,22 +12,14 @@ import { Order } from 'src/order/order.entity';
 import { Role } from 'src/role/role.entity';
 import { CardOrder } from 'src/gift-card-modules/card-order/entities/card-order.entity';
 import { Recipient } from 'src/gift-card-modules/receipient/entities/receipient.entity';
-import { PointTransaction } from 'src/gift-card-modules/point-transaction/entities/point-transaction.entity';
 import { GiftCard } from 'src/gift-card-modules/gift-card/entities/gift-card.entity';
-import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
 import { UserGroupMember } from 'src/user-group-member/user-group-member.entity';
 import { FirebaseDeviceToken } from 'src/notification/firebase/firebase-device-token.entity';
-import { UserLanguage } from './user.constant';
 import { Voucher } from 'src/voucher/entity/voucher.entity';
-import { Balance } from 'src/gift-card-modules/balance/entities/balance.entity';
 import { CampaignRecipient } from 'src/campaign/entity/campaign-recipient.entity';
 
 @Entity('user_tbl')
 export class User extends Base {
-  @AutoMap()
-  @Column({ name: 'phonenumber_column', unique: true })
-  phonenumber: string;
-
   // Id that cua user ben shared-user (identity service) - dung de JwtStrategy
   // map JWT payload.sub sang user cuc bo cua terminal. NOT NULL tu sau
   // migration v4.0.0-01.
@@ -51,46 +42,19 @@ export class User extends Base {
   // Nullable vi user duoc tao qua duong tu cap hang cuc bo (QD19
   // UserProvisioningService) khong con di qua flow tao user + mat khau cuc bo
   // nua - mat khau thuoc ve shared-user. TODO: xoa cot nay o giai doan sau.
-  @Column({ name: 'password_column', nullable: true })
-  password?: string;
-
-  @Column({ name: 'first_name_column', nullable: true })
-  @AutoMap()
-  firstName: string;
-
-  @Column({ name: 'last_name_column', nullable: true })
-  @AutoMap()
-  lastName: string;
-
-  @AutoMap()
-  @Column({ name: 'language_column', default: UserLanguage.VI })
-  language: string;
-
   // Buoc 3.4: trang thai khoa da roi entity. Khoa/mo nam o `shared-user`
   // (`UserActiveChecker`, `JwtStrategy`); `UserResponseDto.isActive` gan tu
   // identity (`user.helper.ts`). Cot cuc bo doi ten `_deprecated_*`, xoa that o
   // giai doan 10; script backfill va `user-retire.helper.ts` doc/ghi no qua
   // `user-legacy-column.helper.ts` (SQL tho, do ten cot).
 
-  @Column({ name: 'dob_column', nullable: true })
-  @AutoMap()
-  dob?: string;
-
-  @Column({ name: 'dob_day_month', nullable: true })
-  @AutoMap()
-  dobDM?: string;
-
-  @AutoMap()
-  @Column({ name: 'email_column', nullable: true, unique: true })
-  email?: string;
-
-  @AutoMap()
-  @Column({ name: 'address_column', nullable: true })
-  address?: string;
-
-  @AutoMap()
-  @Column({ name: 'image_column', nullable: true })
-  image?: string;
+  // Buoc 8.8: `user_tbl` chi con `sharedUserId` + `role` + `branch` (muc 1.6).
+  // Muoi cot identity (phonenumber, password, firstName, lastName, language,
+  // dob, dobDM, email, address, image) va ba quan he vi (`balance`,
+  // `pointTransactions`, `accumulatedPoint` - FK `accumulated_point_column`)
+  // da roi entity: identity doc o shared-user, vi / diem o shared-user. Cot
+  // cuc bo doi ten `_deprecated_*` o 8.9, xoa that o giai doan 10. Dung them
+  // lai cot nao o day de "tien tay" - do la mo lai ban sao identity.
 
   // Many to one with branch
   @AutoMap(() => Branch)
@@ -138,16 +102,8 @@ export class User extends Base {
   })
   senderCardOrders: Recipient[];
 
-  @OneToMany(() => PointTransaction, (pt) => pt.user)
-  pointTransactions: PointTransaction[];
-
   @OneToMany(() => GiftCard, (gc) => gc.usedBy)
   giftCards?: GiftCard[];
-
-  @OneToOne(() => AccumulatedPoint, (accumulatedPoint) => accumulatedPoint.user)
-  @JoinColumn({ name: 'accumulated_point_column' })
-  @AutoMap(() => AccumulatedPoint)
-  accumulatedPoint: AccumulatedPoint;
 
   // One to many with user group members
   @OneToMany(() => UserGroupMember, (userGroupMember) => userGroupMember.user)
@@ -164,9 +120,6 @@ export class User extends Base {
     cascade: ['insert', 'update', 'remove'],
   })
   individualVouchers: Voucher[];
-
-  @OneToOne(() => Balance, (b) => b.user)
-  balance: Balance;
 
   // QD22 (buoc 2.5) - quan he `membershipCard` va `userRequirements` DA GO:
   // the va requirement nay o shared-user, doc qua

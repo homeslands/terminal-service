@@ -89,6 +89,9 @@ export const FULL_IDENTITY_FIELDS = [
   'dob',
   'email',
   'address',
+  // Buoc 8.8: truoc day `language` cua user long lay tu cot cuc bo (`@AutoMap`
+  // tren entity); cot da roi entity => lay tu shared-user nhu cac field kia.
+  'language',
   'image',
   'isVerifiedEmail',
   'isVerifiedPhonenumber',

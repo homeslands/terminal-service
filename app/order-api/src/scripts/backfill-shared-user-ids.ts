@@ -88,8 +88,11 @@ import {
   retireLocalUser,
 } from '../user/user-retire.helper';
 import {
+  LegacyUser,
   readLocalIsActive,
   readLocalVerifiedFlags,
+  saveLegacyUser,
+  withLocalIdentity,
   writeLocalIsActive,
 } from '../user/user-legacy-column.helper';
 import { DEFAULT_CUSTOMER_PHONENUMBER } from '../user/user.constant';
@@ -111,14 +114,18 @@ const DOB_PATTERN = /^(0[1-9]|[12]\d|3[0-1])\/(0[1-9]|1[0-2])\/(19|20)\d{2}$/;
 type Step = '0' | 'A' | 'B';
 
 type Action =
-  | { kind: 'RENAME_ROOT'; user: User }
-  | { kind: 'ATTACH_SENTINEL'; user: User; shared: SharedUserLookupResponse }
-  | { kind: 'DETACH'; user: User; reason: string }
-  | { kind: 'RETIRE'; step: Step; user: User; reason: string }
+  | { kind: 'RENAME_ROOT'; user: LegacyUser }
+  | {
+      kind: 'ATTACH_SENTINEL';
+      user: LegacyUser;
+      shared: SharedUserLookupResponse;
+    }
+  | { kind: 'DETACH'; user: LegacyUser; reason: string }
+  | { kind: 'RETIRE'; step: Step; user: LegacyUser; reason: string }
   | {
       kind: 'ATTACH';
       step: 'A' | 'B';
-      user: User;
+      user: LegacyUser;
       shared: SharedUserLookupResponse;
       // Email lay tu shared ma da co hang cuc bo KHAC giu => de trong (cot
       // UNIQUE). Chi la cache, man hinh van ghep tu shared-user.
@@ -127,7 +134,7 @@ type Action =
   | { kind: 'PROVISION'; shared: SharedUserLookupResponse }
   | {
       kind: 'IMPORT';
-      user: User;
+      user: LegacyUser;
       phonenumber: string;
       junkEmail: boolean;
       passwordHash?: string;
@@ -139,7 +146,7 @@ const isCustomer = (user: User) =>
 
 const lower = (value?: string | null) => (value ?? '').toLowerCase();
 
-const describe = (user: User) =>
+const describe = (user: LegacyUser) =>
   `${user.slug} [${user.role?.name ?? 'NO_ROLE'}] phonenumber=${user.phonenumber}`;
 
 // ==========================================================================
@@ -147,7 +154,7 @@ const describe = (user: User) =>
 // lan chay that dung CHUNG ham nay, nen so lieu dry run la so lieu that.
 // ==========================================================================
 function buildPlan(
-  localUsers: User[],
+  localUsers: LegacyUser[],
   sharedUsers: SharedUserLookupResponse[],
 ): { actions: Action[]; warnings: string[]; kept: number } {
   const actions: Action[] = [];
@@ -163,7 +170,7 @@ function buildPlan(
   const claimed = new Set<string>();
   // Hang cuc bo chua lien ket, chua retire - ung vien cua A va B. Khoa = SDT
   // SAU khi doi `root`.
-  const unlinked = new Map<string, User>();
+  const unlinked = new Map<string, LegacyUser>();
   const plannedPhone = new Map<string, string>();
   let kept = 0;
 
@@ -332,9 +339,9 @@ function buildPlan(
 // ==========================================================================
 interface Outcome {
   provisioned: number;
-  attached: User[];
+  attached: LegacyUser[];
   imported: Array<{
-    user: User;
+    user: LegacyUser;
     sharedId: string;
     junkEmail: boolean;
     needsPasswordReset: boolean;
@@ -376,7 +383,12 @@ async function bootstrap() {
     }
 
     const sharedUsers = await client.listRecent(EPOCH, new Date());
-    const localUsers = await userRepository.find({ relations: ['role'] });
+    // Buoc 8.8: identity cuc bo khong con tren entity - doc bang SQL tho (do
+    // ten cot `X` / `_deprecated_X`), chup cung luc voi hang.
+    const localUsers = await withLocalIdentity(
+      dataSource.manager,
+      await userRepository.find({ relations: ['role'] }),
+    );
     // Trang thai khoa cuc bo - chup MOT lan cung luc voi `localUsers`, de ke
     // hoach in ra va lenh nhap gui di dung cung mot ban chup (terminal service
     // phai TAT khi chay that nen khong ai doi no giua chung).
@@ -404,7 +416,7 @@ async function bootstrap() {
       failures: [],
     };
 
-    const retire = async (user: User, step: Step, reason: string) => {
+    const retire = async (user: LegacyUser, step: Step, reason: string) => {
       const snapshot = describe(user);
       const name = [user.firstName, user.lastName].filter(Boolean).join(' ');
       await retireLocalUser(dataSource.manager, user, {
@@ -423,7 +435,7 @@ async function bootstrap() {
     };
 
     const attach = async (
-      user: User,
+      user: LegacyUser,
       shared: SharedUserLookupResponse,
       dropEmail: boolean,
     ) => {
@@ -447,7 +459,7 @@ async function bootstrap() {
           address: shared.address ?? null,
           image: shared.image ?? null,
         });
-        await tx.save(User, user);
+        await saveLegacyUser(tx, user);
         await writeLocalIsActive(tx, user.id, shared.isActive);
       });
       outcome.attached.push(user);
@@ -538,7 +550,7 @@ async function bootstrap() {
             user.email = email;
           }
           user.sharedUserId = created.id;
-          await tx.save(User, user);
+          await saveLegacyUser(tx, user);
         });
       } catch (error) {
         // Da tao ben shared ma khong ghi duoc lien ket => bu tru, khong de mot
@@ -571,7 +583,7 @@ async function bootstrap() {
               });
               action.user.phonenumber = ROOT_TERMINAL_PHONENUMBER;
               action.user.sharedUserId = randomUUID();
-              await tx.save(User, action.user);
+              await saveLegacyUser(tx, action.user);
             });
             break;
 
@@ -583,7 +595,7 @@ async function bootstrap() {
                 reason: `sentinel -> shared ${action.shared.id}`,
               });
               action.user.sharedUserId = action.shared.id;
-              await tx.save(User, action.user);
+              await saveLegacyUser(tx, action.user);
             });
             break;
 
@@ -595,7 +607,7 @@ async function bootstrap() {
                 reason: action.reason,
               });
               action.user.sharedUserId = randomUUID();
-              await tx.save(User, action.user);
+              await saveLegacyUser(tx, action.user);
             });
             break;
 
@@ -703,7 +715,10 @@ async function reconcile(
   // Doc LAI ca hai ben sau khi ghi - danh tinh vua nhap phai co trong danh sach.
   const sharedUsers = await client.listRecent(EPOCH, new Date());
   const byId = new Map(sharedUsers.map((s) => [s.id, s]));
-  const localUsers = await userRepository.find();
+  const localUsers = await withLocalIdentity(
+    userRepository.manager,
+    await userRepository.find(),
+  );
   const live = localUsers.filter((u) => !isRetiredPhonenumber(u.phonenumber));
 
   const unlinked = live.filter((u) => !byId.has(u.sharedUserId));

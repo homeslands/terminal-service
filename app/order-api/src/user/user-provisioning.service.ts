@@ -115,9 +115,8 @@ export class UserProvisioningService {
     try {
       const newUser = this.userRepository.create({
         sharedUserId: sharedUser.id,
-        // Cot NOT NULL + UNIQUE - van phai chep xuong (quyet dinh A': giu 11 cot
-        // identity lam cache cuc bo, dual-write; xem progress/terminal-api.md).
-        phonenumber: sharedUser.phonenumber,
+        // Buoc 8.8: khong chep SDT xuong nua - cot da roi entity (8.9 doi ten
+        // sau khi `MODIFY ... NULL`).
         role: customerRole,
         // Ngay dang ky THAT ben shared-user - KHONG de @CreateDateColumn tu
         // sinh theo gio tao hang nay (gio dang nhap lan dau / gio job chay,
@@ -129,7 +128,7 @@ export class UserProvisioningService {
       created = true;
     } catch (error) {
       // Race giua bon lop: ca hai cung thay "chua co" roi cung insert, mot
-      // trong hai vi pham unique constraint (sharedUserId/phonenumber).
+      // trong hai vi pham unique constraint (sharedUserId).
       // KHONG coi la loi - doc lai hang ben kia vua tao thanh cong.
       this.logger.warn(
         `Insert local user raced or failed for sharedUserId=${sharedUser.id}, re-reading: ${error.message}`,

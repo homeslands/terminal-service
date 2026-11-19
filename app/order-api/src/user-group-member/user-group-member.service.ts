@@ -29,7 +29,7 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
 import {
   applyUserIdentity,
-  assignNestedUserIsActive,
+  assignNestedUserFlags,
   attachCreatedByForArrayEntity,
   attachCreatedByForSingleEntity,
   batchLookupSharedUserIdentities,
@@ -113,7 +113,7 @@ export class UserGroupMemberService {
       UserGroupMember,
       UserGroupMemberResponseDto,
     );
-    assignNestedUserIsActive([[savedMember.user, response.user]], identityById);
+    assignNestedUserFlags([[savedMember.user, response.user]], identityById);
     return response;
   }
 
@@ -296,7 +296,7 @@ export class UserGroupMemberService {
     // Buoc 3.4: `applyUserIdentity` o tren gan `isActive` len ENTITY - entity
     // da bo field nen automapper khong chep sang DTO nua. Gan lai tren DTO
     // bang `identityById` da tra (khong goi shared-user them lan nao).
-    assignNestedUserIsActive(
+    assignNestedUserFlags(
       userGroupMembersWithUser.map(
         (member, index) => [member.user, items[index]?.user] as const,
       ),
@@ -388,10 +388,7 @@ export class UserGroupMemberService {
       UserGroupMemberResponseDto,
     );
     // Nhu findAll: gan lai `isActive` tren DTO (buoc 3.4).
-    assignNestedUserIsActive(
-      [[memberWithUser.user, response.user]],
-      identityById,
-    );
+    assignNestedUserFlags([[memberWithUser.user, response.user]], identityById);
     return response;
   }
 }

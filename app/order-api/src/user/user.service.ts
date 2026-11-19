@@ -1245,7 +1245,6 @@ export class UserService {
       relations: {
         branch: true,
         role: true,
-        accumulatedPoint: true,
       },
       where: whereOptions,
       order: { createdAt: 'DESC' },

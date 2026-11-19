@@ -8,6 +8,7 @@ export const OWNER_NOT_A_CUSTOMER = 'OWNER_NOT_A_CUSTOMER';
 export const USER_OWNED_BY_ANOTHER_SERVICE = 'USER_OWNED_BY_ANOTHER_SERVICE';
 export const CANNOT_ASSIGN_CUSTOMER_ROLE = 'CANNOT_ASSIGN_CUSTOMER_ROLE';
 export const PHONENUMBER_SEARCH_TOO_BROAD = 'PHONENUMBER_SEARCH_TOO_BROAD';
+export const BIRTHDAY_SEARCH_TOO_BROAD = 'BIRTHDAY_SEARCH_TOO_BROAD';
 export type TUserErrorCodeKey =
   | typeof USER_NOT_FOUND
   | typeof CANNOT_UPDATE_CUSTOMER_ROLE
@@ -16,7 +17,8 @@ export type TUserErrorCodeKey =
   | typeof OWNER_NOT_A_CUSTOMER
   | typeof USER_OWNED_BY_ANOTHER_SERVICE
   | typeof CANNOT_ASSIGN_CUSTOMER_ROLE
-  | typeof PHONENUMBER_SEARCH_TOO_BROAD;
+  | typeof PHONENUMBER_SEARCH_TOO_BROAD
+  | typeof BIRTHDAY_SEARCH_TOO_BROAD;
 export type TUserErrorCode = Record<TUserErrorCodeKey, TErrorCodeValue>;
 
 // 137000 - 138000
@@ -48,5 +50,11 @@ export const UserValidation: TUserErrorCode = {
   PHONENUMBER_SEARCH_TOO_BROAD: createErrorCode(
     137007,
     'Phone number search matches too many users, please narrow the search',
+  ),
+  // Buoc 8.1 - POST /internal/users/by-birthday cua shared-user khop nhieu hon
+  // tran (INTERNAL_SEARCH_BY_BIRTHDAY_MAX). Cung so voi shared-user.
+  BIRTHDAY_SEARCH_TOO_BROAD: createErrorCode(
+    137008,
+    'Date of birth search matches too many users, please narrow the range',
   ),
 };

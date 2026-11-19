@@ -14,6 +14,10 @@ export const INTERNAL_BATCH_LOOKUP_MAX = 200;
 // SONG DOI, cung ten cung gia tri, o shared-user va trend.
 export const INTERNAL_SEARCH_BY_PHONENUMBER_MAX = 500;
 
+// Buoc 8.1 - POST /internal/users/by-birthday (shared-user). Khop nhieu hon
+// => 400 ma 137008 ("tim hep lai"), khong cat bot. Song doi voi shared-user.
+export const INTERNAL_SEARCH_BY_BIRTHDAY_MAX = 5000;
+
 // QD21 - POST /internal/users/list-recent. Luoi rong quet cua so 48 gio,
 // co the la vai nghin hang sau mot dot su co => phan trang la BAT BUOC.
 export const INTERNAL_LIST_RECENT_PAGE_SIZE = 200;

@@ -235,10 +235,15 @@ export class UserService {
     throw new SharedUserUnavailableException();
   }
 
-  private isTodayBirthday(dobDM: string): boolean {
+  // Buoc 8.1: so ngay sinh vua nhap (DD/MM/YYYY) voi hom nay - khong con cot
+  // `dobDM` cuc bo (ngay sinh thuoc shared-user).
+  private isTodayBirthday(dob: string | null | undefined): boolean {
+    const [day, month] = dob ? dob.split('/') : [];
+    if (!day || !month) return false;
     const today = new Date();
-    const todayDM = `${String(today.getDate()).padStart(2, '0')}${String(today.getMonth() + 1).padStart(2, '0')}`;
-    return dobDM === todayDM;
+    return (
+      Number(day) === today.getDate() && Number(month) === today.getMonth() + 1
+    );
   }
 
   async getUserBySlug(slug: string) {
@@ -375,17 +380,8 @@ export class UserService {
       user.branch = branch;
     }
 
-    // `'dob' in requestData` chu KHONG phai `if (requestData.dob)`: phai phan
-    // biet "khong gui truong nay" voi "gui null de XOA ngay sinh". Dung dieu
-    // kien truthy thi lenh xoa ngay sinh chi xoa `dob`, con `dobDM` GIU NGUYEN
-    // gia tri cu - ma `campaign/campaign.scheduler.ts` loc chien dich sinh nhat
-    // dung bang `dobDM`, nen khach da xoa ngay sinh van nhan chien dich vao
-    // ngay cu, mai mai. `trend` da vap va sua dung cho nay
-    // (trend/.../user/user.service.ts:322).
-    if ('dob' in requestData) {
-      const [day, month] = requestData.dob ? requestData.dob.split('/') : [];
-      user.dobDM = day && month ? `${day}${month}` : null;
-    }
+    // Buoc 8.1: KHONG con ghi `dobDM` cuc bo - scheduler sinh nhat hoi ngay
+    // sinh o shared-user (`updateIdentity` ben duoi ghi `dob` sang do).
 
     let identity: Awaited<
       ReturnType<SharedUserServiceClient['updateIdentity']>
@@ -412,11 +408,7 @@ export class UserService {
     try {
       const updatedUser = await this.userRepository.save(user);
       this.logger.log(`User ${user.id} updated profile`, context);
-      if (
-        requestData.dob &&
-        updatedUser.dobDM &&
-        this.isTodayBirthday(updatedUser.dobDM)
-      )
+      if (requestData.dob && this.isTodayBirthday(requestData.dob))
         this.eventEmitter.emit(CampaignAction.USER_BIRTHDAY_TRIGGERED, {
           user: updatedUser,
         });
@@ -738,10 +730,6 @@ export class UserService {
       // doc PENDING + BLOCK), va shared-user khong can mot ban sao cuc bo cua
       // chung. Day cung la mot trong hai nguon ghi vao bang requirement cuc
       // bo mà 2.5 phai dong.
-      if (requestData.dob) {
-        const [day, month] = requestData.dob.split('/');
-        user.dobDM = `${day}${month}`;
-      }
       const createdUser = await this.userRepository.save(user);
       this.logger.log(`User has been created successfully`, context);
 
@@ -749,7 +737,7 @@ export class UserService {
         this.eventEmitter.emit(CampaignAction.USER_CREATED, {
           user: createdUser,
         });
-        if (user.dobDM && this.isTodayBirthday(user.dobDM))
+        if (this.isTodayBirthday(requestData.dob))
           this.eventEmitter.emit(CampaignAction.USER_BIRTHDAY_TRIGGERED, {
             user,
           });

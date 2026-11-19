@@ -8,6 +8,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { QueueRegisterKey } from 'src/app/app.constants';
 import { MailProducer } from './mail.producer';
 import { MailConsumer } from './mail.consumer';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 
 @Module({
   imports: [
@@ -37,6 +38,8 @@ import { MailConsumer } from './mail.consumer';
     BullModule.registerQueue({
       name: QueueRegisterKey.MAIL,
     }),
+    // MailService lay email + ho ten nguoi nhan tu shared-user (buoc 4.4).
+    SharedUserServiceModule,
   ],
   providers: [MailService, MailProducer, MailConsumer],
   exports: [MailService, BullModule],

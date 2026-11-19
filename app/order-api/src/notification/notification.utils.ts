@@ -21,7 +21,40 @@ import { SystemConfigKey } from 'src/system-config/system-config.constant';
 import { SystemConfigValidation } from 'src/system-config/system-config.validation';
 import { CardOrder } from 'src/gift-card-modules/card-order/entities/card-order.entity';
 import { TableBookingEntity } from 'src/table-booking/table-booking.entity';
+import {
+  SharedUserLookupResponse,
+  SharedUserServiceClient,
+} from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
 
+type IdentityMap = Map<string, SharedUserLookupResponse>;
+
+// Ten hien thi tu identity cua shared-user. Bo phan rong thay vi in
+// "null"/"undefined" nhu khi ghep thang hai cot cuc bo.
+const fullNameOf = (identity: SharedUserLookupResponse): string =>
+  [identity.firstName, identity.lastName].filter(Boolean).join(' ');
+
+/**
+ * Buoc 4.2 - ho ten va ngon ngu cua nguoi nhan/gui thong bao lay tu
+ * shared-user (nguon that), KHONG doc `firstName`/`lastName`/`language` tren
+ * hang `user_tbl` cuc bo (ban sao cu, co the rong). Moi ham gom moi nguoi can
+ * dung roi tra MOT luot `batch-lookup` - khong goi tung nguoi trong vong lap.
+ *
+ * Chinh sach loi (progress/trend-api.md 4-b):
+ *   - DUONG HANG LOAT (moi ham tru `sendNotificationForCustomerToGetOrder`):
+ *     chay SAU khi thao tac chinh da ghi xong (doi trang thai mon, thanh toan,
+ *     in loi, dat ban...), nen loi o day KHONG duoc nem ra lam hong thao
+ *     tac do. Nguoi khong tra duoc => bo qua + ghi log, phan con lai cua lo
+ *     van gui. shared-user khong tra loi => ca lo bi bo qua (log loi goc da do
+ *     `batchLookupSharedUserIdentities` ghi). Khong bao gio gui thong bao mang
+ *     ten trong hay ngon ngu doan.
+ *   - `sendNotificationForCustomerToGetOrder` do nhan vien bam truc tiep va
+ *     chua ghi gi truoc do => tra loi ro (503 / USER_NOT_FOUND) thay vi bao
+ *     thanh cong ma khong gui.
+ *
+ * Khong phai identity, giu nguyen: `receiverId`/`senderId` (id CUC BO, ghi vao
+ * `notification_tbl`), `language` cua ban ghi thong bao (snapshot luc gui).
+ */
 @Injectable()
 export class NotificationUtils {
   constructor(
@@ -32,6 +65,7 @@ export class NotificationUtils {
     private readonly logger: Logger,
     private readonly notificationLanguageService: NotificationLanguageService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   /**
@@ -53,7 +87,58 @@ export class NotificationUtils {
     return frontEndUrl;
   }
 
+  /**
+   * Mot luot `batch-lookup` cho moi nguoi cua lo. Duong hang loat: shared-user
+   * khong tra loi thi tra Map rong (moi nguoi bi bo qua), khong nem ra.
+   */
+  private async lookupIdentities(
+    users: Array<User | null | undefined>,
+    context: string,
+  ): Promise<IdentityMap> {
+    try {
+      return await batchLookupSharedUserIdentities(
+        users.map((user) => user?.sharedUserId),
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
+    } catch {
+      // Nguyen nhan goc da duoc batchLookupSharedUserIdentities ghi log.
+      return new Map();
+    }
+  }
+
+  /** Identity da tra cua mot nguoi; khong co thi ghi log ai bi bo qua. */
+  private identityOf(
+    identities: IdentityMap,
+    user: User | null | undefined,
+    context: string,
+  ): SharedUserLookupResponse | undefined {
+    if (!user) return undefined;
+    const identity = identities.get(user.sharedUserId);
+    if (!identity) {
+      this.logger.warn(
+        `Skip notification for user ${user.id}: no shared-user identity for sharedUserId ${user.sharedUserId}`,
+        context,
+      );
+    }
+    return identity;
+  }
+
+  /** Cap (hang cuc bo, identity) cho nhung nguoi tra duoc - bo qua phan con lai. */
+  private withIdentities(
+    users: User[],
+    identities: IdentityMap,
+    context: string,
+  ): Array<[User, SharedUserLookupResponse]> {
+    return users.flatMap((user): Array<[User, SharedUserLookupResponse]> => {
+      const identity = this.identityOf(identities, user, context);
+      return identity ? [[user, identity]] : [];
+    });
+  }
+
   async sendNotificationAfterOrderIsPaid(order: Order) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationAfterOrderIsPaid.name}`;
     // Get all chef role users in the same branch
     const chefRoleUsers = await this.userRepository.find({
       where: {
@@ -66,10 +151,19 @@ export class NotificationUtils {
       },
     });
 
-    const notificationData = chefRoleUsers.map((user) => ({
+    const identities = await this.lookupIdentities(
+      [...chefRoleUsers, order.owner],
+      context,
+    );
+
+    const notificationData = this.withIdentities(
+      chefRoleUsers,
+      identities,
+      context,
+    ).map(([chef, identity]) => ({
       message: NotificationMessageCode.ORDER_NEEDS_PROCESSED,
-      receiverId: user.id,
-      receiverName: `${user.firstName} ${user.lastName}`,
+      receiverId: chef.id,
+      receiverName: fullNameOf(identity),
       type: NotificationType.ORDER,
       metadata: {
         order: order.slug,
@@ -83,28 +177,32 @@ export class NotificationUtils {
       },
     }));
 
-    notificationData.push({
-      message: NotificationMessageCode.ORDER_PAID,
-      receiverId: order.owner.id,
-      receiverName: `${order.owner.firstName} ${order.owner.lastName}`,
-      type: NotificationType.ORDER,
-      metadata: {
-        order: order.slug,
-        orderType: order.type,
-        tableName: order.table?.name,
-        table: order.table?.slug,
-        branchName: order.branch?.name,
-        branch: order.branch?.slug,
-        referenceNumber: order.referenceNumber.toString(),
-        createdAt: order.createdAt.toISOString(),
-      },
-    });
+    const ownerIdentity = this.identityOf(identities, order.owner, context);
+    if (ownerIdentity) {
+      notificationData.push({
+        message: NotificationMessageCode.ORDER_PAID,
+        receiverId: order.owner.id,
+        receiverName: fullNameOf(ownerIdentity),
+        type: NotificationType.ORDER,
+        metadata: {
+          order: order.slug,
+          orderType: order.type,
+          tableName: order.table?.name,
+          table: order.table?.slug,
+          branchName: order.branch?.name,
+          branch: order.branch?.slug,
+          referenceNumber: order.referenceNumber.toString(),
+          createdAt: order.createdAt.toISOString(),
+        },
+      });
+    }
 
     // Send notification to all chef role users in the same branch
     await this.notificationProducer.bulkCreateNotification(notificationData);
   }
 
   async sendNotificationAfterOrderIsProcessed(order: Order) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationAfterOrderIsProcessed.name}`;
     // Create notification to send to staffs in the same branch
     const staffs = await this.userRepository.find({
       where: {
@@ -117,11 +215,17 @@ export class NotificationUtils {
       },
     });
 
-    const notificationData = staffs.map((staff) => ({
+    const identities = await this.lookupIdentities(staffs, context);
+
+    const notificationData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => ({
       message: NotificationMessageCode.ORDER_NEEDS_DELIVERED,
       receiverId: staff.id,
       type: NotificationType.ORDER,
-      receiverName: `${staff.firstName} ${staff.lastName}`,
+      receiverName: fullNameOf(identity),
       metadata: {
         order: order?.slug,
         orderType: order?.type,
@@ -171,10 +275,36 @@ export class NotificationUtils {
       throw new NotificationException(NotificationValidation.SENDER_NOT_FOUND);
     }
 
+    // Nhan vien bam truc tiep, chua ghi gi => khong nuot loi: shared-user
+    // khong tra loi thi 503 (SharedUserUnavailableException), khong co
+    // identity thi cung ma loi nhu khi thieu hang cuc bo.
+    const identities = await batchLookupSharedUserIdentities(
+      [customer.sharedUserId, sender.sharedUserId],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    const customerIdentity = identities.get(customer.sharedUserId);
+    if (!customerIdentity) {
+      this.logger.error(
+        `${UserValidation.USER_NOT_FOUND.message}: no shared-user identity for sharedUserId ${customer.sharedUserId}`,
+        context,
+      );
+      throw new UserException(UserValidation.USER_NOT_FOUND);
+    }
+    const senderIdentity = identities.get(sender.sharedUserId);
+    if (!senderIdentity) {
+      this.logger.error(
+        `${NotificationValidation.SENDER_NOT_FOUND.message}: no shared-user identity for sharedUserId ${sender.sharedUserId}`,
+        context,
+      );
+      throw new NotificationException(NotificationValidation.SENDER_NOT_FOUND);
+    }
+
     const notificationMessage = this.notificationLanguageService.format(
       NotificationMessageCode.ORDER_NEEDS_READY_TO_GET,
       { referenceNumber: order.referenceNumber.toString() },
-      customer.language as string,
+      customerIdentity.language,
     );
 
     const frontEndUrl = await this.getFrontendUrl();
@@ -183,12 +313,12 @@ export class NotificationUtils {
       message: NotificationMessageCode.ORDER_NEEDS_READY_TO_GET,
       receiverId: customer.id,
       type: NotificationType.ORDER,
-      receiverName: `${customer.firstName} ${customer.lastName}`,
+      receiverName: fullNameOf(customerIdentity),
       senderId: sender.id,
-      senderName: `${sender.firstName} ${sender.lastName}`,
+      senderName: fullNameOf(senderIdentity),
       title: notificationMessage.title,
       body: notificationMessage.body,
-      language: customer.language,
+      language: customerIdentity.language,
       link: `${frontEndUrl}/history?order=${order.slug}`,
       metadata: {
         order: order.slug,
@@ -205,6 +335,7 @@ export class NotificationUtils {
   }
 
   async sendNotificationForAllBranchStaffsWhenFailedBillPrinting(order: Order) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationForAllBranchStaffsWhenFailedBillPrinting.name}`;
     // Create notification to send to staffs in the same branch
     const staffs = await this.userRepository.find({
       where: {
@@ -222,23 +353,28 @@ export class NotificationUtils {
       },
     });
 
+    const identities = await this.lookupIdentities(staffs, context);
     const frontEndUrl = await this.getFrontendUrl();
 
-    const notificationData = staffs.map((staff) => {
+    const notificationData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.notificationLanguageService.format(
         NotificationMessageCode.ORDER_BILL_FAILED_PRINTING,
         { referenceNumber: order.referenceNumber.toString() },
-        staff.language as string,
+        identity.language,
       );
 
       return {
         message: NotificationMessageCode.ORDER_BILL_FAILED_PRINTING,
         receiverId: staff.id,
         type: NotificationType.ORDER,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/order-management?order=${order.slug}`,
         metadata: {
           order: order.slug,
@@ -259,6 +395,7 @@ export class NotificationUtils {
   async sendNotificationForAllBranchStaffsWhenFailedChefOrderPrinting(
     order: Order,
   ) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationForAllBranchStaffsWhenFailedChefOrderPrinting.name}`;
     // Create notification to send to staffs in the same branch
     const staffs = await this.userRepository.find({
       where: {
@@ -276,23 +413,28 @@ export class NotificationUtils {
       },
     });
 
+    const identities = await this.lookupIdentities(staffs, context);
     const frontEndUrl = await this.getFrontendUrl();
 
-    const notificationData = staffs.map((staff) => {
+    const notificationData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.notificationLanguageService.format(
         NotificationMessageCode.ORDER_CHEF_ORDER_FAILED_PRINTING,
         { referenceNumber: order.referenceNumber.toString() },
-        staff.language as string,
+        identity.language,
       );
 
       return {
         message: NotificationMessageCode.ORDER_CHEF_ORDER_FAILED_PRINTING,
         receiverId: staff.id,
         type: NotificationType.ORDER,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/chef-order`,
         metadata: {
           order: order.slug,
@@ -313,6 +455,7 @@ export class NotificationUtils {
   async sendNotificationForAllBranchStaffsWhenFailedLabelTicketPrinting(
     order: Order,
   ) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationForAllBranchStaffsWhenFailedLabelTicketPrinting.name}`;
     // Create notification to send to staffs in the same branch
     const staffs = await this.userRepository.find({
       where: {
@@ -330,23 +473,28 @@ export class NotificationUtils {
       },
     });
 
+    const identities = await this.lookupIdentities(staffs, context);
     const frontEndUrl = await this.getFrontendUrl();
 
-    const notificationData = staffs.map((staff) => {
+    const notificationData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.notificationLanguageService.format(
         NotificationMessageCode.ORDER_LABEL_TICKET_FAILED_PRINTING,
         { referenceNumber: order.referenceNumber.toString() },
-        staff.language as string,
+        identity.language,
       );
 
       return {
         message: NotificationMessageCode.ORDER_LABEL_TICKET_FAILED_PRINTING,
         receiverId: staff.id,
         type: NotificationType.ORDER,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/chef-order`,
         metadata: {
           order: order.slug,
@@ -379,6 +527,10 @@ export class NotificationUtils {
       return;
     }
 
+    const identities = await this.lookupIdentities([customer], context);
+    const customerIdentity = this.identityOf(identities, customer, context);
+    if (!customerIdentity) return;
+
     const frontEndUrl = await this.getFrontendUrl();
 
     const notificationMessage = this.notificationLanguageService.format(
@@ -387,17 +539,17 @@ export class NotificationUtils {
         cardTitle: cardOrder.cardTitle,
         orderCode: cardOrder.code,
       },
-      customer.language as string,
+      customerIdentity.language,
     );
 
     const notificationData = {
       message: NotificationMessageCode.CARD_ORDER_PAID,
       receiverId: customer.id,
-      receiverName: `${customer.firstName} ${customer.lastName}`,
+      receiverName: fullNameOf(customerIdentity),
       type: NotificationType.CARD_ORDER,
       title: notificationMessage.title,
       body: notificationMessage.body,
-      language: customer.language,
+      language: customerIdentity.language,
       link: `${frontEndUrl}/profile/gift-card`,
       metadata: {
         cardOrder: cardOrder.slug,
@@ -467,14 +619,20 @@ export class NotificationUtils {
   async sendNotificationAfterTableBookingIsCreated(
     booking: TableBookingEntity,
   ) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationAfterTableBookingIsCreated.name}`;
     const staffs = await this.getTableBookingStaffs();
     if (staffs.length === 0) return;
+    const identities = await this.lookupIdentities(staffs, context);
 
     const frontEndUrl = await this.getFrontendUrl();
     const bookingTime = this.formatBookingDate(booking.date);
     const metadata = this.buildTableBookingMetadata(booking);
 
-    const notificationData = staffs.map((staff) => {
+    const notificationData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.notificationLanguageService.format(
         NotificationMessageCode.TABLE_BOOKING_CREATED,
         {
@@ -482,17 +640,17 @@ export class NotificationUtils {
           bookingTime,
           seats: booking.seats ?? '',
         },
-        staff.language as string,
+        identity.language,
       );
 
       return {
         message: NotificationMessageCode.TABLE_BOOKING_CREATED,
         receiverId: staff.id,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         type: NotificationType.TABLE_BOOKING,
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/table-booking?booking=${booking.slug}`,
         metadata,
       };
@@ -508,31 +666,37 @@ export class NotificationUtils {
   async sendNotificationAfterTableBookingIsConfirmed(
     booking: TableBookingEntity,
   ) {
+    const context = `${NotificationUtils.name}.${this.sendNotificationAfterTableBookingIsConfirmed.name}`;
     const staffs = await this.getTableBookingStaffs();
     if (staffs.length === 0) return;
+    const identities = await this.lookupIdentities(staffs, context);
 
     const frontEndUrl = await this.getFrontendUrl();
     const bookingTime = this.formatBookingDate(booking.date);
     const metadata = this.buildTableBookingMetadata(booking);
 
-    const notificationData = staffs.map((staff) => {
+    const notificationData = this.withIdentities(
+      staffs,
+      identities,
+      context,
+    ).map(([staff, identity]) => {
       const notificationMessage = this.notificationLanguageService.format(
         NotificationMessageCode.TABLE_BOOKING_CONFIRMED,
         {
           customerPhoneNumber: booking.phone,
           bookingTime,
         },
-        staff.language as string,
+        identity.language,
       );
 
       return {
         message: NotificationMessageCode.TABLE_BOOKING_CONFIRMED,
         receiverId: staff.id,
-        receiverName: `${staff.firstName} ${staff.lastName}`,
+        receiverName: fullNameOf(identity),
         type: NotificationType.TABLE_BOOKING,
         title: notificationMessage.title,
         body: notificationMessage.body,
-        language: staff.language,
+        language: identity.language,
         link: `${frontEndUrl}/system/table-booking?booking=${booking.slug}`,
         metadata,
       };

@@ -17,6 +17,7 @@ import { FirebaseDeviceToken } from './firebase/firebase-device-token.entity';
 import { NotificationLanguageService } from './language/notification-language.service';
 import { SystemConfigService } from 'src/system-config/system-config.service';
 import { SystemConfig } from 'src/system-config/system-config.entity';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 
 @Global()
 @Module({
@@ -32,6 +33,8 @@ import { SystemConfig } from 'src/system-config/system-config.entity';
     ]),
     DbModule,
     UserModule,
+    // NotificationUtils ghep ten + ngon ngu tu shared-user (buoc 4.2).
+    SharedUserServiceModule,
   ],
   controllers: [NotificationController],
   providers: [

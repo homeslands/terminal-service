@@ -29,6 +29,7 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
 import {
   applyUserIdentity,
+  assignNestedUserIsActive,
   attachCreatedByForArrayEntity,
   attachCreatedByForSingleEntity,
   batchLookupSharedUserIdentities,
@@ -95,13 +96,25 @@ export class UserGroupMemberService {
     userGroupMember.userGroup = userGroup;
     userGroupMember.createdBy = addedById;
 
+    // Buoc 3.4 - `user.isActive` tu shared-user (truoc buoc nay cho nay tra
+    // thang cot cuc bo), tra TRUOC khi ghi: shared-user hong thi 503 khi chua
+    // them ai vao nhom. Tra SAU thi client nhan 503 cho mot thanh vien DA
+    // them.
+    const identityById = await batchLookupSharedUserIdentities(
+      [user.sharedUserId],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
     const savedMember =
       await this.userGroupMemberRepository.save(userGroupMember);
-    return this.mapper.map(
+    const response = this.mapper.map(
       savedMember,
       UserGroupMember,
       UserGroupMemberResponseDto,
     );
+    assignNestedUserIsActive([[savedMember.user, response.user]], identityById);
+    return response;
   }
 
   async bulkAddUsersToGroup(
@@ -280,6 +293,15 @@ export class UserGroupMemberService {
       UserGroupMember,
       UserGroupMemberResponseDto,
     );
+    // Buoc 3.4: `applyUserIdentity` o tren gan `isActive` len ENTITY - entity
+    // da bo field nen automapper khong chep sang DTO nua. Gan lai tren DTO
+    // bang `identityById` da tra (khong goi shared-user them lan nao).
+    assignNestedUserIsActive(
+      userGroupMembersWithUser.map(
+        (member, index) => [member.user, items[index]?.user] as const,
+      ),
+      identityById,
+    );
 
     // QD22 (buoc 2.5) - field `user.membershipCard` cua ca trang: MOT luot
     // batch, khong goi theo tung dong (muc 1.1 quy tac 4). Giao dien doc
@@ -360,10 +382,16 @@ export class UserGroupMemberService {
       );
     }
 
-    return this.mapper.map(
+    const response = this.mapper.map(
       memberWithUser,
       UserGroupMember,
       UserGroupMemberResponseDto,
     );
+    // Nhu findAll: gan lai `isActive` tren DTO (buoc 3.4).
+    assignNestedUserIsActive(
+      [[memberWithUser.user, response.user]],
+      identityById,
+    );
+    return response;
   }
 }

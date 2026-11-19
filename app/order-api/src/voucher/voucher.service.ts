@@ -64,6 +64,13 @@ import { UserGroup } from 'src/user-group/user-group.entity';
 import { UserGroupException } from 'src/user-group/user-group.exception';
 import { UserGroupValidation } from 'src/user-group/user-group.validation';
 import { User } from 'src/user/user.entity';
+import {
+  applyNestedUserIsActive,
+  assignNestedUserIsActive,
+  batchLookupSharedUserIdentities,
+} from 'src/user/user.helper';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { SharedUserUnavailableException } from 'src/external-services/shared-user-service/shared-user-service.exception';
 import { Product } from 'src/product/product.entity';
 import { RoleEnum } from 'src/role/role.enum';
 import { OrderItem } from 'src/order-item/order-item.entity';
@@ -106,6 +113,9 @@ export class VoucherService {
     private readonly productUtils: ProductUtils,
     @InjectRepository(VoucherPaymentMethod)
     private readonly voucherPaymentMethodRepository: Repository<VoucherPaymentMethod>,
+    // Buoc 3.4 - `assignedUser.isActive` lay tu shared-user
+    // (applyNestedUserIsActive), khong con tu cot cuc bo.
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   async validateVoucher(validateVoucherDto: ValidateVoucherDto) {
@@ -345,6 +355,15 @@ export class VoucherService {
 
     voucher.voucherPaymentMethods = voucherPaymentMethods;
 
+    // Buoc 3.4 - tra `isActive` cua `assignedUser` TRUOC khi ghi: shared-user
+    // hong thi 503 ngay day, khi chua ghi gi. Tra SAU khi ghi thi client nhan
+    // 503 cho mot voucher DA tao - goi lai la tao trung.
+    const assignedUserIdentityById = await batchLookupSharedUserIdentities(
+      [assignedUser?.sharedUserId],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
     const createdVoucher = await this.transactionService.execute<Voucher>(
       async (manager) => {
         const createdVoucher = await manager.save(voucher);
@@ -369,7 +388,16 @@ export class VoucherService {
         );
       },
     );
-    return this.mapper.map(createdVoucher, Voucher, VoucherResponseDto);
+    const response = this.mapper.map(
+      createdVoucher,
+      Voucher,
+      VoucherResponseDto,
+    );
+    assignNestedUserIsActive(
+      [[createdVoucher.assignedUser, response.assignedUser]],
+      assignedUserIdentityById,
+    );
+    return response;
   }
 
   async bulkCreate(bulkCreateVoucherDto: BulkCreateVoucherDto) {
@@ -535,6 +563,9 @@ export class VoucherService {
         );
       },
     );
+    // Khong ghep `assignedUser.isActive` tu shared-user: `POST /voucher/bulk` chi
+    // tra so luong, bo mang DTO - goi shared-user o day chi them phu thuoc (buoc
+    // 3.4, bo sau kiem song 15/11/2026).
     return this.mapper.mapArray(createdVouchers, Voucher, VoucherResponseDto);
   }
   async findAllForUser(
@@ -1348,6 +1379,15 @@ export class VoucherService {
         Voucher,
         VoucherResponseDto,
       );
+      await applyNestedUserIsActive(
+        vouchers.map(
+          (voucher, index) =>
+            [voucher.assignedUser, vouchersDto[index]?.assignedUser] as const,
+        ),
+        this.sharedUserServiceClient,
+        this.logger,
+        context,
+      );
       return {
         hasNext,
         hasPrevios: hasPrevious,
@@ -1358,6 +1398,9 @@ export class VoucherService {
         totalPages,
       } as AppPaginatedResponseDto<VoucherResponseDto>;
     } catch (error) {
+      // shared-user khong tra loi => 503 nhu moi cho ghep identity khac, khong
+      // bi nuot thanh FIND_ALL_VOUCHER_FAILED.
+      if (error instanceof SharedUserUnavailableException) throw error;
       this.logger.error(error.message, error.stack, context);
       throw new VoucherException(
         VoucherValidation.FIND_ALL_VOUCHER_FAILED,
@@ -1367,6 +1410,33 @@ export class VoucherService {
   }
 
   async findOne(option: GetVoucherDto) {
+    const voucher = await this.getVoucherForFindOne(option);
+    const response = this.mapper.map(voucher, Voucher, VoucherResponseDto);
+    await applyNestedUserIsActive(
+      [[voucher.assignedUser, response.assignedUser]],
+      this.sharedUserServiceClient,
+      this.logger,
+      `${VoucherService.name}.${this.findOne.name}`,
+    );
+    return response;
+  }
+
+  /**
+   * Ban cho route CONG KHAI `GET /voucher/specific/public` (`@Public`).
+   *
+   * KHONG ghep `assignedUser.isActive` tu shared-user: route nay khong qua
+   * `JwtStrategy`, goi shared-user o day la THEM mot phu thuoc cho route cong
+   * khai - shared-user tat thi khach khong xem duoc voucher (buoc 3.4, sua sau
+   * review 15/11/2026). He qua: `assignedUser` o route nay KHONG con key
+   * `isActive` (entity `User` da bo field, automapper khong chep). Hai giao
+   * dien khong doc field nay; ghi o muc "API thay doi".
+   */
+  async findOnePublic(option: GetVoucherDto) {
+    const voucher = await this.getVoucherForFindOne(option);
+    return this.mapper.map(voucher, Voucher, VoucherResponseDto);
+  }
+
+  private async getVoucherForFindOne(option: GetVoucherDto) {
     if (_.isEmpty(option))
       throw new VoucherException(VoucherValidation.FIND_ONE_VOUCHER_FAILED);
 
@@ -1375,7 +1445,7 @@ export class VoucherService {
       code: option.code,
     };
 
-    const voucher = await this.voucherUtils.getVoucher({
+    return this.voucherUtils.getVoucher({
       where: findOptionsWhere,
       relations: {
         voucherProducts: {
@@ -1387,7 +1457,6 @@ export class VoucherService {
         assignedUser: true,
       },
     });
-    return this.mapper.map(voucher, Voucher, VoucherResponseDto);
   }
 
   async update(slug: string, updateVoucherDto: UpdateVoucherDto) {
@@ -1536,6 +1605,14 @@ export class VoucherService {
     voucher.voucherGroup = voucherGroup;
     voucher.assignedUser = assignedUser;
 
+    // Buoc 3.4 - tra `isActive` cua `assignedUser` TRUOC khi ghi: nhu `create`
+    // (`assignedUser` la nguoi SAU khi cap nhat).
+    const assignedUserIdentityById = await batchLookupSharedUserIdentities(
+      [assignedUser?.sharedUserId],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
     const updatedVoucher = await this.transactionService.execute<Voucher>(
       async (manager) => {
         return await manager.save(voucher);
@@ -1558,7 +1635,16 @@ export class VoucherService {
         );
       },
     );
-    return this.mapper.map(updatedVoucher, Voucher, VoucherResponseDto);
+    const response = this.mapper.map(
+      updatedVoucher,
+      Voucher,
+      VoucherResponseDto,
+    );
+    assignNestedUserIsActive(
+      [[updatedVoucher.assignedUser, response.assignedUser]],
+      assignedUserIdentityById,
+    );
+    return response;
   }
 
   async remove(slug: string) {

@@ -57,6 +57,14 @@
  *
  * Idempotent: chay lai, hang da xu ly roi vao nhanh "giu" (da lien ket) hoac
  * duoc nhan ra qua tien to `retired-`.
+ *
+ * ## Cot da rut khoi entity (Phu luc D, quy dinh 2)
+ *
+ * Script nay giu toi cuoi du an va tren staging/prod chay SAU khi
+ * `migration:run` da chay het - luc do cot cuc bo co the da mang ten
+ * `_deprecated_*`. Cot nao entity `User` da bo thi KHONG doc qua field entity
+ * ma qua `user/user-legacy-column.helper.ts` (SQL tho, do ten cot). Tu buoc
+ * 3.4: trang thai khoa cuc bo (`isActive`).
  */
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
@@ -79,6 +87,10 @@ import {
   isRetiredPhonenumber,
   retireLocalUser,
 } from '../user/user-retire.helper';
+import {
+  readLocalIsActive,
+  writeLocalIsActive,
+} from '../user/user-legacy-column.helper';
 import { DEFAULT_CUSTOMER_PHONENUMBER } from '../user/user.constant';
 import { INTERNAL_SERVICE_NAME } from '../common/constants/internal-api.constant';
 
@@ -364,12 +376,16 @@ async function bootstrap() {
 
     const sharedUsers = await client.listRecent(EPOCH, new Date());
     const localUsers = await userRepository.find({ relations: ['role'] });
+    // Trang thai khoa cuc bo - chup MOT lan cung luc voi `localUsers`, de ke
+    // hoach in ra va lenh nhap gui di dung cung mot ban chup (terminal service
+    // phai TAT khi chay that nen khong ai doi no giua chung).
+    const localActive = await readLocalIsActive(dataSource.manager);
     logger.log(
       `shared-user: ${sharedUsers.length} danh tinh | terminal_db: ${localUsers.length} hang`,
     );
 
     const { actions, warnings, kept } = buildPlan(localUsers, sharedUsers);
-    printPlan(logger, actions, warnings, kept);
+    printPlan(logger, actions, warnings, kept, localActive);
 
     if (!execute) {
       logger.log('DRY RUN xong - khong ghi gi.');
@@ -427,9 +443,9 @@ async function bootstrap() {
           dobDM: day && month ? `${day}${month}` : null,
           address: shared.address ?? null,
           image: shared.image ?? null,
-          isActive: shared.isActive,
         });
         await tx.save(User, user);
+        await writeLocalIsActive(tx, user.id, shared.isActive);
       });
       outcome.attached.push(user);
     };
@@ -439,6 +455,12 @@ async function bootstrap() {
       action: Extract<Action, { kind: 'IMPORT' }>,
     ) => {
       const { user } = action;
+      // `shared-user` bat buoc field nay, va doan bua la mo khoa mot nhan vien
+      // dang bi khoa - khong doc duoc thi hong hanh dong nay (vao `failures`).
+      const isActive = localActive.get(user.id);
+      if (isActive === undefined) {
+        throw new Error('khong doc duoc trang thai khoa cuc bo');
+      }
       let junkEmail = action.junkEmail;
       let email = junkEmail ? generateRetiredEmail() : user.email;
 
@@ -452,7 +474,7 @@ async function bootstrap() {
           dob: user.dob ?? undefined,
           address: user.address ?? undefined,
           image: user.image ?? undefined,
-          isActive: user.isActive,
+          isActive,
           isVerifiedPhonenumber: user.isVerifiedPhonenumber,
           isVerifiedEmail: user.isVerifiedEmail,
           createdAt: user.createdAt
@@ -612,6 +634,7 @@ function printPlan(
   actions: Action[],
   warnings: string[],
   kept: number,
+  localActive: Map<string, boolean>,
 ) {
   const count = (predicate: (a: Action) => boolean) =>
     actions.filter(predicate).length;
@@ -649,10 +672,12 @@ function printPlan(
   if (imports.length) {
     logger.log('---- NHAN VIEN SE NHAP SANG shared-user (owner_service = terminal, BAT BIEN) ----');
     for (const a of imports) {
+      const active = localActive.get(a.user.id);
       const flags = [
         !a.passwordHash && 'CAN DAT LAI MAT KHAU',
         a.junkEmail && 'EMAIL RAC',
-        !a.user.isActive && 'DANG KHOA',
+        active === false && 'DANG KHOA',
+        active === undefined && 'KHONG DOC DUOC TRANG THAI KHOA - SE HONG',
       ].filter(Boolean);
       logger.log(`  ${describe(a.user)} -> ${a.phonenumber}${flags.length ? ` (${flags.join(', ')})` : ''}`);
     }

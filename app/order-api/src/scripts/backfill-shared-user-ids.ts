@@ -89,6 +89,7 @@ import {
 } from '../user/user-retire.helper';
 import {
   readLocalIsActive,
+  readLocalVerifiedFlags,
   writeLocalIsActive,
 } from '../user/user-legacy-column.helper';
 import { DEFAULT_CUSTOMER_PHONENUMBER } from '../user/user.constant';
@@ -380,6 +381,8 @@ async function bootstrap() {
     // hoach in ra va lenh nhap gui di dung cung mot ban chup (terminal service
     // phai TAT khi chay that nen khong ai doi no giua chung).
     const localActive = await readLocalIsActive(dataSource.manager);
+    // Buoc 4.7: hai co xac minh cung roi entity - chup cung luc, cung ly do.
+    const localVerified = await readLocalVerifiedFlags(dataSource.manager);
     logger.log(
       `shared-user: ${sharedUsers.length} danh tinh | terminal_db: ${localUsers.length} hang`,
     );
@@ -461,6 +464,12 @@ async function bootstrap() {
       if (isActive === undefined) {
         throw new Error('khong doc duoc trang thai khoa cuc bo');
       }
+      // Cung luat voi `isActive`: khong doc duoc thi hong hanh dong nay (vao
+      // `failures`), khong doan `false`.
+      const verified = localVerified.get(user.id);
+      if (verified === undefined) {
+        throw new Error('khong doc duoc hai co xac minh cuc bo');
+      }
       let junkEmail = action.junkEmail;
       let email = junkEmail ? generateRetiredEmail() : user.email;
 
@@ -475,8 +484,8 @@ async function bootstrap() {
           address: user.address ?? undefined,
           image: user.image ?? undefined,
           isActive,
-          isVerifiedPhonenumber: user.isVerifiedPhonenumber,
-          isVerifiedEmail: user.isVerifiedEmail,
+          isVerifiedPhonenumber: verified.isVerifiedPhonenumber,
+          isVerifiedEmail: verified.isVerifiedEmail,
           createdAt: user.createdAt
             ? new Date(user.createdAt).toISOString()
             : undefined,

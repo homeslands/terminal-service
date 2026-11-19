@@ -25,6 +25,9 @@ const DEPRECATED_PREFIX = '_deprecated_';
 const COLUMN_NAME_PATTERN = /^[a-z_]+$/;
 
 export const USER_IS_ACTIVE_COLUMN = 'is_active_column';
+export const USER_IS_VERIFIED_EMAIL_COLUMN = 'is_verified_email_column';
+export const USER_IS_VERIFIED_PHONENUMBER_COLUMN =
+  'is_verified_phonenumber_column';
 
 /**
  * Ten THAT tren DB hien tai cua mot cot `user_tbl`: `<ten>` hoac
@@ -77,7 +80,49 @@ const toBoolean = (value: unknown): boolean | null =>
 export async function readLocalIsActive(
   manager: EntityManager,
 ): Promise<Map<string, boolean>> {
-  const column = await resolveUserColumn(manager, USER_IS_ACTIVE_COLUMN);
+  return readLocalBooleanColumn(manager, USER_IS_ACTIVE_COLUMN);
+}
+
+/** Hai co xac minh CUC BO cua mot hang `user_tbl`. */
+export type LocalVerifiedFlags = {
+  isVerifiedEmail: boolean;
+  isVerifiedPhonenumber: boolean;
+};
+
+/**
+ * Buoc 4.7 - hai co xac minh CUC BO cua moi hang `user_tbl`, theo `id_column`.
+ *
+ * Nhu `readLocalIsActive`: gia tri that nam o `shared-user`; chi script
+ * backfill can ban cuc bo, de nhap nhan vien CHI CO o terminal sang
+ * `shared-user` voi dung hai co da co o day. Hang co mot trong hai cot NULL
+ * thi vang mat trong ket qua (hai cot NOT NULL nen khong xay ra tren DB dung).
+ */
+export async function readLocalVerifiedFlags(
+  manager: EntityManager,
+): Promise<Map<string, LocalVerifiedFlags>> {
+  const email = await readLocalBooleanColumn(
+    manager,
+    USER_IS_VERIFIED_EMAIL_COLUMN,
+  );
+  const phonenumber = await readLocalBooleanColumn(
+    manager,
+    USER_IS_VERIFIED_PHONENUMBER_COLUMN,
+  );
+  const result = new Map<string, LocalVerifiedFlags>();
+  for (const [id, isVerifiedEmail] of email) {
+    const isVerifiedPhonenumber = phonenumber.get(id);
+    if (isVerifiedPhonenumber === undefined) continue;
+    result.set(id, { isVerifiedEmail, isVerifiedPhonenumber });
+  }
+  return result;
+}
+
+/** Mot cot boolean CUC BO cua moi hang `user_tbl`, theo `id_column`. */
+async function readLocalBooleanColumn(
+  manager: EntityManager,
+  logicalColumn: string,
+): Promise<Map<string, boolean>> {
+  const column = await resolveUserColumn(manager, logicalColumn);
   const rows: Array<{ id: string; value: unknown }> = await manager.query(
     `SELECT \`id_column\` AS id, \`${column}\` AS value FROM \`${USER_TABLE}\``,
   );

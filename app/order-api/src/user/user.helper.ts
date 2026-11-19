@@ -130,7 +130,8 @@ export const mergeSharedUserIdentityInto = <T extends Record<string, any>>(
  *
  * Tu buoc 3.4: neu `target` la entity `User` se dem di automapper thi
  * `isActive` gan o day KHONG toi duoc DTO (entity da bo field, automapper bo
- * qua) - phai gan them tren DTO sau khi map bang `assignNestedUserIsActive`.
+ * qua) - phai gan them tren DTO sau khi map bang `assignNestedUserFlags`. Hai
+ * co xac minh trong `FULL_IDENTITY_FIELDS` cung vay tu buoc 4.7.
  *
  * Luu y: UserService.mergeSharedUserIdentity CO CHU DICH khong dung ham nay
  * - danh sach field cua no khong co `image`, con UserResponseDto cung khong
@@ -188,36 +189,49 @@ export const batchLookupSharedUserIdentities = async (
   }
 };
 
+/** Ba co trang thai cua `UserResponseDto` khong con cot tren entity `User`. */
+type NestedUserFlags = {
+  isActive?: boolean;
+  isVerifiedEmail?: boolean;
+  isVerifiedPhonenumber?: boolean;
+};
+
 /** Mot cap (user entity da nap, user DTO da map tu chinh entity do). */
 export type NestedUserPair = readonly [
   Pick<User, 'sharedUserId'> | null | undefined,
-  { isActive?: boolean } | null | undefined,
+  NestedUserFlags | null | undefined,
 ];
 
 /**
- * Buoc 3.4 - gan `isActive` cho user LONG trong response SAU khi map.
+ * Gan ba co trang thai cho user LONG trong response SAU khi map: `isActive`
+ * (buoc 3.4) va hai co xac minh email/SDT (buoc 4.7).
  *
- * Vi sao phai gan tren DTO chu khong tren entity: entity `User` da bo field
- * `isActive`, ma automapper (`@automapper/core` 8, `createInitialMapping`)
- * chi map nhung field co trong METADATA cua class nguon - gan
- * `user.isActive = ...` len entity truoc khi map thi bi bo qua im lang, key
- * bien mat khoi JSON (muc 1.4). Nen gan sau khi map, len chinh DTO.
+ * Vi sao phai gan tren DTO chu khong tren entity: entity `User` da bo ca ba
+ * field, ma automapper (`@automapper/core` 8, `createInitialMapping`) chi map
+ * nhung field co trong METADATA cua class nguon - gan len entity truoc khi map
+ * (`applyUserIdentity`, `mergeSharedUserIdentityInto` voi
+ * `FULL_IDENTITY_FIELDS`) thi bi bo qua im lang, key bien mat khoi JSON (muc
+ * 1.4). Nen gan sau khi map, len chinh DTO.
  *
- * Cung luat voi `applyUserIdentity`: lay tu identity cua shared-user, khong
- * co identity => `false`.
+ * Lay tu identity cua shared-user; khong co identity => `false` ca ba (cung
+ * luat voi `applyUserIdentity`): khong co ban ghi ben shared-user thi tai
+ * khoan khong dung duoc va khong co gi da duoc xac minh.
  */
-export const assignNestedUserIsActive = (
+export const assignNestedUserFlags = (
   pairs: ReadonlyArray<NestedUserPair>,
   identityById: Map<string, SharedUserLookupResponse>,
 ): void => {
   for (const [user, dto] of pairs) {
     if (!user || !dto) continue;
-    dto.isActive = identityById.get(user.sharedUserId)?.isActive ?? false;
+    const identity = identityById.get(user.sharedUserId);
+    dto.isActive = identity?.isActive ?? false;
+    dto.isVerifiedEmail = identity?.isVerifiedEmail ?? false;
+    dto.isVerifiedPhonenumber = identity?.isVerifiedPhonenumber ?? false;
   }
 };
 
 /**
- * Nhu `assignNestedUserIsActive` nhung tu tra identity - MOT lan batch cho ca
+ * Nhu `assignNestedUserFlags` nhung tu tra identity - MOT lan batch cho ca
  * trang (khong N+1), fail-closed 503 nhu `batchLookupSharedUserIdentities`.
  * Khong cap nao co user => khong goi shared-user.
  *
@@ -227,12 +241,12 @@ export const assignNestedUserIsActive = (
  * - Duong GHI: goi SAU khi ghi thi shared-user hong => client nhan 503 cho
  *   mot thao tac DA thanh cong, goi lai la ghi trung (vd cong diem hai lan).
  *   Phai `batchLookupSharedUserIdentities` TRUOC lenh ghi dau tien, roi
- *   `assignNestedUserIsActive` sau khi map.
+ *   `assignNestedUserFlags` sau khi map.
  * - Route `@Public`: khong qua `JwtStrategy`, goi o day la THEM mot phu
  *   thuoc shared-user cho route cong khai => route cong khai khong ghep
- *   `isActive` (vd `VoucherService.findOnePublic`).
+ *   co trang thai (vd `VoucherService.findOnePublic`).
  */
-export const applyNestedUserIsActive = async (
+export const applyNestedUserFlags = async (
   pairs: ReadonlyArray<NestedUserPair>,
   sharedUserServiceClient: SharedUserServiceClient,
   logger: Pick<LoggerService, 'error'>,
@@ -246,6 +260,6 @@ export const applyNestedUserIsActive = async (
     logger,
     context,
   );
-  assignNestedUserIsActive(present, identityById);
+  assignNestedUserFlags(present, identityById);
 };
 

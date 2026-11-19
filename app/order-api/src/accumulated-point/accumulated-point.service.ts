@@ -1,13 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  FindManyOptions,
-  FindOptionsWhere,
-  Repository,
-  Between,
-  In,
-} from 'typeorm';
-import { AccumulatedPointTransactionHistory } from './entities/accumulated-point-transaction-history.entity';
+import { Repository } from 'typeorm';
 import { ACCUMULATED_POINT_OBJECT_TYPE_ORDER } from './accumulated-point.constants';
 import { InjectMapper } from '@automapper/nestjs';
 import { Mapper } from '@automapper/core';
@@ -50,8 +43,6 @@ import { TErrorCodeValue } from 'src/app/app.validation';
 export class AccumulatedPointService {
   constructor(
     private readonly configService: ConfigService,
-    @InjectRepository(AccumulatedPointTransactionHistory)
-    private readonly transactionHistoryRepository: Repository<AccumulatedPointTransactionHistory>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Order)
@@ -84,7 +75,7 @@ export class AccumulatedPointService {
 
     const user = await this.userRepository.findOne({
       where: { slug: userSlug },
-      relations: ['accumulatedPoint', 'role'],
+      relations: ['role'],
     });
 
     if (!user) {
@@ -113,82 +104,34 @@ export class AccumulatedPointService {
       );
     }
 
-    if (!user.accumulatedPoint) {
-      return {
-        hasNext: false,
-        hasPrevios: false,
-        items: [],
-        total: 0,
-        page: query.hasPaging ? query.page : 1,
-        pageSize: query.hasPaging ? query.size : 0,
-        totalPages: 0,
-      } as AppPaginatedResponseDto<PointTransactionHistoryResponseDto>;
-    }
-
-    // Construct where options
-    const whereOptions: FindOptionsWhere<AccumulatedPointTransactionHistory> = {
-      accumulatedPoint: {
-        id: user.accumulatedPoint.id,
-      },
-      type: In([query.types]),
-    };
-
-    if (query.fromDate && query.toDate) {
-      whereOptions.createdAt = Between(
-        new Date(query.fromDate),
-        new Date(query.toDate),
-      );
-    } else if (query.fromDate) {
-      whereOptions.createdAt = Between(new Date(query.fromDate), new Date());
-    } else if (query.toDate) {
-      whereOptions.createdAt = Between(
-        new Date('1970-01-01'),
-        new Date(query.toDate),
-      );
-    }
-
-    // Construct find many options
-    const findManyOptions: FindManyOptions = {
-      relations: ['order'],
-      where: whereOptions,
-      order: { date: 'DESC' },
-    };
-
-    if (query.hasPaging) {
-      findManyOptions.skip = (query.page - 1) * query.size;
-      findManyOptions.take = query.size;
-    }
-
-    const [transactions, total] =
-      await this.transactionHistoryRepository.findAndCount(findManyOptions);
-
-    // Calculate total pages
-    const page = query.hasPaging ? query.page : 1;
-    const pageSize = query.hasPaging ? query.size : total;
-    const totalPages = Math.ceil(total / pageSize);
-
-    // Determine hasNext and hasPrevious
-    const hasNext = page < totalPages;
-    const hasPrevious = page > 1;
-
-    // Map to response DTOs
-    const items = transactions.map((transaction) => ({
-      ...this.mapper.map(
-        transaction,
-        AccumulatedPointTransactionHistory,
-        PointTransactionHistoryResponseDto,
-      ),
-      orderSlug: transaction.order?.slug,
-    }));
-
+    // Buoc 8.5 (dong muc "Can review (3)" cua 7.7d): lich su lay o shared-user
+    // (`/internal/accumulated-points/history`) thay cho bang lich su cuc bo -
+    // bang do dong bang tu 7.8 (thieu moi giao dich sau cutover) va roi khoi
+    // terminal o 8.7-8.9. Role + khach vang lai van gac o tren, theo du lieu cua
+    // terminal (QD15). Lich su la cua NGUOI do (vi diem dung chung), nhu man tu
+    // xem ben shared-user. Khong co nguoi do o shared-user => trang rong (nhu
+    // nguoi chua co hang diem); shared-user khong tra loi => 503 (fail-closed).
+    const page =
+      await this.sharedUserServiceClient.pointsHistoryAccumulatedPoints<
+        AppPaginatedResponseDto<PointTransactionHistoryResponseDto>
+      >({
+        userId: user.sharedUserId,
+        types: query.types,
+        fromDate: query.fromDate ? String(query.fromDate) : undefined,
+        toDate: query.toDate ? String(query.toDate) : undefined,
+        hasPaging: query.hasPaging,
+        page: query.page,
+        size: query.size,
+      });
+    if (page) return page;
     return {
-      hasNext,
-      hasPrevios: hasPrevious,
-      items,
-      total,
-      page,
-      pageSize,
-      totalPages,
+      hasNext: false,
+      hasPrevios: false,
+      items: [],
+      total: 0,
+      page: query.hasPaging ? query.page : 1,
+      pageSize: query.hasPaging ? query.size : 0,
+      totalPages: 0,
     } as AppPaginatedResponseDto<PointTransactionHistoryResponseDto>;
   }
 

@@ -785,6 +785,31 @@ export class SharedUserServiceClient {
     }
   }
 
+  // Buoc 8.5: lich su diem "xem ho" (QD17) cua MOT nguoi - ban noi bo cua
+  // GET /accumulated-point/history ben shared-user (cung bo loc, cung shape
+  // trang). Khong co nguoi do o shared-user (404) => `null`. Loi khac =>
+  // 503/162001 - KHONG duoc hieu thanh "lich su rong".
+  async pointsHistoryAccumulatedPoints<T>(body: {
+    userId: string;
+    types: string[];
+    fromDate?: string;
+    toDate?: string;
+    hasPaging?: boolean;
+    page?: number;
+    size?: number;
+  }): Promise<T | null> {
+    try {
+      return await this.post<T>('internal/accumulated-points/history', body);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
   // Buoc 7.7d: bon lenh GHI diem qua `postMoney` (goi lai mot lan; 4xx nem
   // nguyen loi axios). shared-user chua co lookup theo khoa cho diem => hong
   // hai lan la 503 "khong biet" (7.6); goi lai cung khoa sau do la `replayed`.

@@ -14,10 +14,8 @@ import { GiftCardController } from './gift-card/gift-card.controller';
 import { CardOrderService } from './card-order/card-order.service';
 import { GiftCardService } from './gift-card/gift-card.service';
 import { ReceipientController } from './receipient/recipient.controller';
-import { Balance } from './balance/entities/balance.entity';
 import { GiftCard } from './gift-card/entities/gift-card.entity';
 import { CardOrder } from './card-order/entities/card-order.entity';
-import { BalanceProfile } from './balance/balance.mapper';
 import { User } from 'src/user/user.entity';
 import { CardOrderProfile } from './card-order/card-order.mapper';
 import { GiftCardProfile } from './gift-card/gift-card.mapper';
@@ -34,7 +32,6 @@ import { CardOrderListener } from './card-order/card-order.listener';
 import { JobModule } from 'src/job/job.module';
 import { PointTransactionController } from './point-transaction/point-transaction.controller';
 import { PointTransactionService } from './point-transaction/point-transaction.service';
-import { PointTransactionProfile } from './point-transaction/point-transaction.mapper';
 import { Order } from 'src/order/order.entity';
 import { GiftCardScheduler } from './gift-card/gift-card.scheduler';
 import { PdfModule } from 'src/pdf/pdf.module';
@@ -85,12 +82,10 @@ const providers = [
 ];
 
 const mappers = [
-  BalanceProfile,
   CardProfile,
   CardOrderProfile,
   RecipientProfile,
   GiftCardProfile,
-  PointTransactionProfile,
   FeatureFlagProfile,
   CoinPolicyProfile,
   CardOrderRevenueProfile
@@ -99,9 +94,6 @@ const mappers = [
 const modules = [
   TypeOrmModule.forFeature([
     Card,
-    // Buoc 8.5: `Balance` o lai toi 8.7 - `BalanceService` (cung module) con
-    // `findOneByField` / `create` doc bang cuc bo, go cung thu muc o 8.7.
-    Balance,
     CardOrder,
     GiftCard,
     Recipient,

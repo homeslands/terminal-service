@@ -1,5 +1,5 @@
 import { Repository, In, IsNull } from 'typeorm';
-import { Logger } from '@nestjs/common';
+import { LoggerService } from '@nestjs/common';
 import { User } from './user.entity';
 import {
   SharedUserLookupResponse,
@@ -128,6 +128,10 @@ export const mergeSharedUserIdentityInto = <T extends Record<string, any>>(
  * toan tuy tien: khong co ban ghi ben shared-user thi tai khoan do khong xac
  * thuc duoc (JwtStrategy tra theo sharedUserId roi chan neu khong thay).
  *
+ * Tu buoc 3.4: neu `target` la entity `User` se dem di automapper thi
+ * `isActive` gan o day KHONG toi duoc DTO (entity da bo field, automapper bo
+ * qua) - phai gan them tren DTO sau khi map bang `assignNestedUserIsActive`.
+ *
  * Luu y: UserService.mergeSharedUserIdentity CO CHU DICH khong dung ham nay
  * - danh sach field cua no khong co `image`, con UserResponseDto cung khong
  * khai bao `image`, nen dung chung se them field la vao response cua
@@ -161,7 +165,9 @@ export const applyUserIdentity = <T extends Record<string, any>>(
 export const batchLookupSharedUserIdentities = async (
   sharedUserIds: Array<string | null | undefined>,
   sharedUserServiceClient: SharedUserServiceClient,
-  logger: Logger,
+  // Chi can `error` - nhan ca logger cua Nest lan logger winston ma vai service
+  // khai kieu (vd `PointTransactionService`).
+  logger: Pick<LoggerService, 'error'>,
   context: string,
 ): Promise<Map<string, SharedUserLookupResponse>> => {
   const ids = Array.from(
@@ -180,5 +186,66 @@ export const batchLookupSharedUserIdentities = async (
     );
     throw new SharedUserUnavailableException();
   }
+};
+
+/** Mot cap (user entity da nap, user DTO da map tu chinh entity do). */
+export type NestedUserPair = readonly [
+  Pick<User, 'sharedUserId'> | null | undefined,
+  { isActive?: boolean } | null | undefined,
+];
+
+/**
+ * Buoc 3.4 - gan `isActive` cho user LONG trong response SAU khi map.
+ *
+ * Vi sao phai gan tren DTO chu khong tren entity: entity `User` da bo field
+ * `isActive`, ma automapper (`@automapper/core` 8, `createInitialMapping`)
+ * chi map nhung field co trong METADATA cua class nguon - gan
+ * `user.isActive = ...` len entity truoc khi map thi bi bo qua im lang, key
+ * bien mat khoi JSON (muc 1.4). Nen gan sau khi map, len chinh DTO.
+ *
+ * Cung luat voi `applyUserIdentity`: lay tu identity cua shared-user, khong
+ * co identity => `false`.
+ */
+export const assignNestedUserIsActive = (
+  pairs: ReadonlyArray<NestedUserPair>,
+  identityById: Map<string, SharedUserLookupResponse>,
+): void => {
+  for (const [user, dto] of pairs) {
+    if (!user || !dto) continue;
+    dto.isActive = identityById.get(user.sharedUserId)?.isActive ?? false;
+  }
+};
+
+/**
+ * Nhu `assignNestedUserIsActive` nhung tu tra identity - MOT lan batch cho ca
+ * trang (khong N+1), fail-closed 503 nhu `batchLookupSharedUserIdentities`.
+ * Khong cap nao co user => khong goi shared-user.
+ *
+ * CHI dung o duong DOC co dang nhap. Ly do "503 khong mat gi" cua
+ * `batchLookupSharedUserIdentities` dua tren hai gia dinh, sai o hai noi
+ * (sua sau review buoc 3.4, 15/11/2026):
+ * - Duong GHI: goi SAU khi ghi thi shared-user hong => client nhan 503 cho
+ *   mot thao tac DA thanh cong, goi lai la ghi trung (vd cong diem hai lan).
+ *   Phai `batchLookupSharedUserIdentities` TRUOC lenh ghi dau tien, roi
+ *   `assignNestedUserIsActive` sau khi map.
+ * - Route `@Public`: khong qua `JwtStrategy`, goi o day la THEM mot phu
+ *   thuoc shared-user cho route cong khai => route cong khai khong ghep
+ *   `isActive` (vd `VoucherService.findOnePublic`).
+ */
+export const applyNestedUserIsActive = async (
+  pairs: ReadonlyArray<NestedUserPair>,
+  sharedUserServiceClient: SharedUserServiceClient,
+  logger: Pick<LoggerService, 'error'>,
+  context: string,
+): Promise<void> => {
+  const present = pairs.filter(([user, dto]) => user && dto);
+  if (!present.length) return;
+  const identityById = await batchLookupSharedUserIdentities(
+    present.map(([user]) => user.sharedUserId),
+    sharedUserServiceClient,
+    logger,
+    context,
+  );
+  assignNestedUserIsActive(present, identityById);
 };
 

@@ -1,21 +1,24 @@
 import { AutomapperProfile, InjectMapper } from '@automapper/nestjs';
-import { createMap, extend, Mapper } from '@automapper/core';
+import { createMap, Mapper } from '@automapper/core';
 import { Injectable } from '@nestjs/common';
 
-import {
-  AuthProfileResponseDto,
-  ForgotPasswordResponseDto,
-  InitiateRegisterResponseDto,
-  RegisterAuthRequestDto,
-  RegisterAuthResponseDto,
-  VerifyEmailResponseDto,
-} from './auth.dto';
+import { AuthProfileResponseDto } from './auth.dto';
 import { User } from 'src/user/user.entity';
-import { VerifyEmailToken } from './entity/verify-email-token.entity';
-import { baseMapper } from 'src/app/base.mapper';
-import { ForgotPasswordToken } from './entity/forgot-password-token.entity';
-import { RegisterOtpToken } from './entity/register-otp-token.entity';
 
+/**
+ * Buoc 3.3 (giai doan 3) - profile nay con DUNG MOT map:
+ * `User -> AuthProfileResponseDto`, phuc vu `GET /auth/profile`.
+ *
+ * Nam map kia da xoa cung bon entity token (`VerifyEmailToken`,
+ * `ForgotPasswordToken`, `RegisterOtpToken`) va cac DTO dang ky cua buoc nay.
+ * `extend(baseMapper(mapper))` theo do cung khong con can, nen `extend` va
+ * `baseMapper` roi khoi danh sach import.
+ *
+ * Luu y khi doc lai: map cua entity token KHONG can
+ * `TypeOrmModule.forFeature` (buoc 3.2 da go chung khoi do) - mapper chi can
+ * CLASS. Vi vay o 3.2 tep nay van bien dich binh thuong du forFeature da sach;
+ * den 3.3 moi den luot no.
+ */
 @Injectable()
 export class AuthProfile extends AutomapperProfile {
   constructor(@InjectMapper() mapper: Mapper) {
@@ -24,27 +27,7 @@ export class AuthProfile extends AutomapperProfile {
 
   override get profile() {
     return (mapper: Mapper) => {
-      createMap(mapper, RegisterAuthRequestDto, User);
-      createMap(mapper, User, RegisterAuthResponseDto);
       createMap(mapper, User, AuthProfileResponseDto);
-      createMap(
-        mapper,
-        VerifyEmailToken,
-        VerifyEmailResponseDto,
-        extend(baseMapper(mapper)),
-      );
-      createMap(
-        mapper,
-        ForgotPasswordToken,
-        ForgotPasswordResponseDto,
-        extend(baseMapper(mapper)),
-      );
-      createMap(
-        mapper,
-        RegisterOtpToken,
-        InitiateRegisterResponseDto,
-        extend(baseMapper(mapper)),
-      );
     };
   }
 }

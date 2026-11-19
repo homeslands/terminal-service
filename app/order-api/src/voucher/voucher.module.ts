@@ -22,6 +22,7 @@ import { User } from 'src/user/user.entity';
 import { UserGroup } from 'src/user-group/user-group.entity';
 import { Order } from 'src/order/order.entity';
 import { Variant } from 'src/variant/variant.entity';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -37,6 +38,8 @@ import { Variant } from 'src/variant/variant.entity';
     ]),
     DbModule,
     UserModule,
+    // Buoc 3.4 - VoucherService ghep `assignedUser.isActive` tu shared-user.
+    SharedUserServiceModule,
     forwardRef(() => OrderModule),
   ],
   controllers: [VoucherController],

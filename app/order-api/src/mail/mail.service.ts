@@ -16,21 +16,6 @@ export class MailService {
     private readonly logger: Logger,
   ) {}
 
-  async sendForgotPasswordToken(user: User, code: string, expiresAt: string) {
-    const context = `${MailService.name}.${this.sendForgotPasswordToken.name}`;
-    await this.mailProducer.sendMail({
-      to: user.email, // list of receivers
-      subject: '[The Terminal] Reset Password', // Subject line
-      template: resolve('public/templates/mail/forgot-password'), // `.ejs` extension is appended automatically
-      context: {
-        name: `${user.firstName} ${user.lastName}`,
-        code,
-        expiresAt,
-      },
-    });
-    this.logger.log(`Email is sending to ${user.email}`, context);
-  }
-
   async sendNewPassword(user: User, newPassword: string) {
     const context = `${MailService.name}.${this.sendNewPassword.name}`;
     try {

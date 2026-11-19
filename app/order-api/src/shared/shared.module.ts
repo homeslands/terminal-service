@@ -12,10 +12,7 @@ import { CardOrder } from 'src/gift-card-modules/card-order/entities/card-order.
 import { Payment } from 'src/payment/entity/payment.entity';
 import { ACBConnectorConfig } from 'src/acb-connector/acb-connector.entity';
 import { DbModule } from 'src/db/db.module';
-import { Balance } from 'src/gift-card-modules/balance/entities/balance.entity';
 import { Job } from 'src/job/job.entity';
-import { SharedBalanceService } from './services/shared-balance.service';
-import { SharedPointTransactionService } from './services/shared-point-transaction.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GiftCard } from 'src/gift-card-modules/gift-card/entities/gift-card.entity';
 import { SharedExportFileService } from './services/shared-export-file.service';
@@ -46,14 +43,11 @@ import { SharedUserServiceModule } from 'src/external-services/shared-user-servi
       CardOrder,
       Payment,
       ACBConnectorConfig,
-      Balance,
       GiftCard,
       CoinPolicy
     ]),
   ],
   providers: [
-    SharedBalanceService,
-    SharedPointTransactionService,
     SharedExportFileService,
     SharedCoinPolicyService,
     // Chua ai inject o giai doan 2 (noi dung dau tien: giai doan 5). Dang ky
@@ -61,8 +55,6 @@ import { SharedUserServiceModule } from 'src/external-services/shared-user-servi
     SharedUserRefService,
   ],
   exports: [
-    SharedBalanceService,
-    SharedPointTransactionService,
     SharedExportFileService,
     SharedCoinPolicyService,
     SharedUserRefService,

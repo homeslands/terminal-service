@@ -32,8 +32,6 @@ import { PrinterJob } from 'src/printer/entity/printer-job.entity';
 import { Invoice } from 'src/invoice/invoice.entity';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
 import { User } from 'src/user/user.entity';
-import { AccumulatedPointTransactionHistory } from 'src/accumulated-point/entities/accumulated-point-transaction-history.entity';
-import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
 
 @Module({
   imports: [
@@ -53,8 +51,6 @@ import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-poi
       ACBConnectorConfig,
       PrinterJob,
       Invoice,
-      AccumulatedPoint,
-      AccumulatedPointTransactionHistory,
       User,
     ]),
     DbModule,

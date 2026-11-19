@@ -25,12 +25,12 @@ import {
   PointTransactionObjectTypeEnum,
   PointTransactionTypeEnum,
 } from '../point-transaction/entities/point-transaction.enum';
-import { CreatePointTransactionDto } from '../point-transaction/dto/create-point-transaction.dto';
 import moment from 'moment';
 import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
+import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import { FindAllGiftCardDto } from './dto/find-all-gift-card.dto';
 import { createSortOptions } from 'src/shared/utils/obj.util';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
@@ -38,6 +38,7 @@ import { CoinPolicy } from '../coin-policy/entities/coin-policy.entity';
 import { CoinPolicyKeyEnum } from '../coin-policy/coin-policy.enum';
 import { CoinPolicyException } from '../coin-policy/coin-policy.exception';
 import { CoinPolicyValidation } from '../coin-policy/coin-policy.validation';
+import { assertUserKeyLoaded } from 'src/user/user.constant';
 
 @Injectable()
 export class GiftCardService {
@@ -69,17 +70,33 @@ export class GiftCardService {
   ) { }
 
   async use(req: UseGiftCardDto) {
+    const context = `${GiftCardService.name}.${this.use.name}`;
+
     // 2. Auto-redeem
     const gc = await this.redeem(req);
 
+    // C3 — MOT nguon khoa cho ca ba lenh (buoc 2.12/2.13 — 2C).
+    //
+    // Ban cu dung HAI cach viet cho CUNG mot nguoi: lenh cong doc
+    // `gc.usedBySlug`, lenh doc lai doc `req.userSlug`. Khong phai loi hanh vi
+    // - `redeem()` tra `user` theo chinh `payload.userSlug` roi gan
+    // `usedBySlug = user.slug` - nhung hai cach viet cho cung mot gia tri la
+    // thu se thanh loi that khi co nguoi sua mot ben.
+    //
+    // `gc.usedBy` la chinh ban ghi `user` ma `redeem()` da tra (no gan
+    // `usedBy: user` truoc khi luu). `assertUserKeyLoaded` o day de neu mot
+    // ngay `manager.save()` khong con giu quan he do thi hong ON AO, thay vi
+    // cong xu cho khong ai.
+    const sharedUserId = assertUserKeyLoaded(gc.usedBy?.sharedUserId, context);
+
     // Update recipient balance ONCE after all cards
     await this.balanceService.calcBalance({
-      userSlug: gc.usedBySlug,
+      sharedUserId,
       points: gc.cardPoints,
       type: PointTransactionTypeEnum.IN,
     });
 
-    const currentBalance = await this.balanceService.findOneByField({ userSlug: req.userSlug, slug: null })
+    const currentBalance = await this.balanceService.findOneByField({ sharedUserId, slug: null })
 
     // Create transaction record
     await this.ptService.create({
@@ -88,9 +105,9 @@ export class GiftCardService {
       objectType: PointTransactionObjectTypeEnum.GIFT_CARD,
       objectSlug: gc.slug,
       points: gc.cardPoints,
-      userSlug: gc.usedBySlug,
+      sharedUserId,
       balance: currentBalance.points
-    } as CreatePointTransactionDto);
+    } satisfies CreatePointTransactionPayload);
 
 
     return this.mapper.map(gc, GiftCard, GiftCardResponseDto);
@@ -200,7 +217,7 @@ export class GiftCardService {
       throw new GiftCardException(GiftCardValidation.GIFT_CARD_NOT_FOUND);
 
     if (policy?.isActive) {
-      const balance = await this.balanceService.findOneByField({ userSlug: payload.userSlug, slug: null });
+      const balance = await this.balanceService.findOneByField({ sharedUserId: user.sharedUserId, slug: null });
       const newBalance = balance.points + gc.cardPoints;
       const maxBalance = +policy.value;
       if (newBalance > maxBalance)

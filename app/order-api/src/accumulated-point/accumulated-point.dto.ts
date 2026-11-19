@@ -136,7 +136,14 @@ export class GetPointHistoryQueryDto extends BaseQueryDto {
 }
 
 export interface IAddPointsDto {
-  userId: string;
+  /**
+   * Khoa nguoi dung la `sharedUserId`, KHONG phai id cuc bo (buoc 2.14 — 2C,
+   * muc 1.10). Doi ten khoa ma giu nguyen gia tri la "SOT 1" cua dot ra
+   * 12/09/2026 — ca hai deu `string` nen TypeScript khong bat duoc; vi the
+   * than `addPointsForOrder` cho khoa nay di qua `assertUserKeyLoaded` truoc
+   * khi dua vao `where`.
+   */
+  sharedUserId: string;
   orderId: string;
   points: number;
   orderTotal: number;

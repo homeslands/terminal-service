@@ -32,7 +32,7 @@ export class SharedCoinPolicyService {
     if (!policy?.isActive) return false;
 
     const balance = await this.balanceService.findOneByField({
-      userSlug: payload.userSlug,
+      sharedUserId: payload.sharedUserId,
       slug: null,
     });
     const newBalance = +balance.points + payload.totalPoints;

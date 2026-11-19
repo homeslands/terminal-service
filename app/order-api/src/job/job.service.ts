@@ -21,12 +21,13 @@ import {
   PointTransactionTypeEnum,
 } from 'src/gift-card-modules/point-transaction/entities/point-transaction.enum';
 import { CurrencyUtil } from 'src/shared/utils/currency.util';
-import { CreatePointTransactionDto } from 'src/gift-card-modules/point-transaction/dto/create-point-transaction.dto';
 import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
 import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
+import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
 import { InvoiceAction } from 'src/invoice/invoice.constants';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
+import { orderRef } from 'src/shared/constants/service-ref.constant';
 
 @Injectable()
 export class JobService {
@@ -118,15 +119,20 @@ export class JobService {
 
         // Handle calc balance when use point payment method
         if (order.payment?.paymentMethod === PaymentMethod.POINT) {
+          // MOT nguon khoa cho ca ba lenh duoi (buoc 2.12/2.13 — 2C). Doc
+          // `sharedUserId`, KHONG phai `slug`: doi ten khoa ma giu nguyen gia
+          // tri la "SOT 1" cua dot ra 12/09/2026, TypeScript khong bat duoc.
+          const sharedUserId = order.owner?.sharedUserId;
+
           // Calc balance
           await this.sharedBalanceService.calcBalance({
-            userSlug: order.owner?.slug,
+            sharedUserId,
             points: order.payment.amount,
             type: 'out',
           });
 
           const currentBalance = await this.sharedBalanceService.findOneByField(
-            { userSlug: order.owner?.slug, slug: null },
+            { sharedUserId, slug: null },
           );
 
           // Create point transaction
@@ -136,14 +142,17 @@ export class JobService {
             objectType: PointTransactionObjectTypeEnum.ORDER,
             objectSlug: order.slug,
             points: order.payment?.amount,
-            userSlug: order.owner?.slug,
+            sharedUserId,
             balance: currentBalance.points,
-          } as CreatePointTransactionDto);
+          } satisfies CreatePointTransactionPayload);
         }
 
         // confirm use accumulated points
         try {
-          await this.accumulatedPointService.confirmPointsUsage(order.id);
+          // Buoc 2.15 — 2C: tham chieu `terminal:<orderSlug>`, khong phai id cuc bo.
+          await this.accumulatedPointService.confirmPointsUsage(
+            orderRef(order.slug),
+          );
           this.logger.log(
             `Confirmed points usage for order ${order.slug}`,
             context,
@@ -158,8 +167,17 @@ export class JobService {
 
         // add accumulated points
         try {
+          // Buoc 2.14 — 2C: khoa la `sharedUserId`, KHONG phai id cuc bo.
+          // `getOrder` nap quan he `owner.role` khong hep `select:` nen cot
+          // guong co mat; ben nhan (`addPointsForOrder`) tu goi
+          // `assertUserKeyLoaded` truoc khi dua vao `where`.
+          //
+          // ⚠ Chuoi `try/catch` nay **nuot loi** (chi `logger.error`), nen doi
+          // sai khoa o day thi job van COMPLETED, don van PAID, chi la khong
+          // ai duoc cong diem - **khong co mau do nao**. Kiem bang cach doc
+          // `accumulated_point_tbl` cua dung nguoi do, dung doc ma thoat.
           await this.accumulatedPointService.addPointsForOrder({
-            userId: order.owner.id,
+            sharedUserId: order.owner?.sharedUserId,
             orderId: order.id,
             points: order.payment?.amount,
             orderTotal: order.subtotal - order.deliveryFee,

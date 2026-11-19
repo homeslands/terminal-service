@@ -9,7 +9,8 @@ import { BalanceValidation } from 'src/gift-card-modules/balance/balance.validat
 import { User } from 'src/user/user.entity';
 import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
-import { FindByFieldDto } from 'src/gift-card-modules/balance/dto/find-by-field.dto';
+import { assertUserKeyLoaded } from 'src/user/user.constant';
+import { BalanceLookupPayload } from 'src/shared/interfaces/commons/shared-balance.interface';
 
 @Injectable()
 export class SharedBalanceService {
@@ -69,7 +70,7 @@ export class SharedBalanceService {
     );
   }
 
-  async create(payload: { userSlug: string }) {
+  async create(payload: { sharedUserId: string }) {
     const context = `${SharedBalanceService.name}.${this.create.name}`;
     this.logger.log(
       `Creating balance req: ${JSON.stringify(payload)}`,
@@ -77,7 +78,9 @@ export class SharedBalanceService {
     );
 
     const user = await this.userRepository.findOne({
-      where: { slug: payload.userSlug },
+      where: {
+        sharedUserId: assertUserKeyLoaded(payload.sharedUserId, context),
+      },
     });
     if (!user) throw new AuthException(AuthValidation.USER_NOT_FOUND);
 
@@ -100,7 +103,7 @@ export class SharedBalanceService {
     );
   }
 
-  async findOneByField(payload: FindByFieldDto) {
+  async findOneByField(payload: BalanceLookupPayload) {
     const context = `${SharedBalanceService.name}.${this.findOneByField.name}`;
     this.logger.debug(
       `Finding balance by field: ${JSON.stringify(payload)}`,
@@ -109,12 +112,13 @@ export class SharedBalanceService {
 
     const where: FindOptionsWhere<Balance> = {};
     if (payload.slug) where.slug = payload.slug;
-    if (payload.userSlug) where.user = { slug: payload.userSlug };
+    if (payload.sharedUserId)
+      where.user = { sharedUserId: payload.sharedUserId };
     // Ca hai khoa deu rong => `where = {}` se lay HANG DAU BANG (vi cua nguoi
     // la). Ep `slug IS NULL` de khong khop hang nao => BALANCE_NOT_FOUND ben
     // duoi. Chi khi CA HAI rong: mot khoa rong ma gan IsNull thi hong luot tra
     // theo nguoi dung.
-    if (!payload.slug && !payload.userSlug) where.slug = IsNull();
+    if (!payload.slug && !payload.sharedUserId) where.slug = IsNull();
 
     const balance = await this.balanceRepository.findOne({ where: where });
     if (!balance)
@@ -123,22 +127,24 @@ export class SharedBalanceService {
     return balance;
   }
 
-  async validate(payload: { userSlug: string; points: number }) {
+  async validate(payload: { sharedUserId: string; points: number }) {
     const context = `${SharedBalanceService.name}.${this.validate.name}`;
     this.logger.log(
       `Validate balance req: ${JSON.stringify(payload)}`,
       context,
     );
 
+    const sharedUserId = assertUserKeyLoaded(payload.sharedUserId, context);
+
     let balance = await this.balanceRepository.findOne({
       where: {
         user: {
-          slug: payload.userSlug,
+          sharedUserId,
         },
       },
     });
     if (!balance) {
-      balance = await this.create({ userSlug: payload.userSlug });
+      balance = await this.create({ sharedUserId });
     }
 
     const newPointsValue = balance.points - payload.points;
@@ -151,22 +157,24 @@ export class SharedBalanceService {
   }
 
   async calcBalance(payload: {
-    userSlug: string;
+    sharedUserId: string;
     points: number;
     type: 'in' | 'out';
   }) {
     const context = `${SharedBalanceService.name}.${this.calcBalance.name}`;
     this.logger.log(`Calc balance req: ${JSON.stringify(payload)}`, context);
 
+    const sharedUserId = assertUserKeyLoaded(payload.sharedUserId, context);
+
     let balance = await this.balanceRepository.findOne({
       where: {
         user: {
-          slug: payload.userSlug,
+          sharedUserId,
         },
       },
     });
     if (!balance) {
-      balance = await this.create({ userSlug: payload.userSlug });
+      balance = await this.create({ sharedUserId });
     }
 
     const points = Math.abs(payload.points);

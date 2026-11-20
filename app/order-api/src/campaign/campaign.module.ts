@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { User } from 'src/user/user.entity';
 import { Product } from 'src/product/product.entity';
 import { VoucherGroup } from 'src/voucher-group/voucher-group.entity';
@@ -17,6 +18,7 @@ import { UserBirthdayCampaignStrategy } from './strategy/user-birthday-campaign/
 
 @Module({
   imports: [
+    SharedUserServiceModule,
     TypeOrmModule.forFeature([
       Campaign,
       CampaignRecipient,

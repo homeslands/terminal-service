@@ -194,3 +194,114 @@ export function parseOrderRef(ref: string): ParsedOrderRef {
 
   return { service: ref.slice(0, at), orderSlug };
 }
+// ---------------------------------------------------------------------------
+// Buoc 5.5 — khoa idempotent cho lenh ghi vi. GHI SAN, CHUA GUI DI DAU: so cai
+// con o `terminal_db`, 7.7 moi doi dich ghi sang vi o shared-user
+// va gui kem khoa nay. Moi cho se gui da danh dau comment "Buoc 5.5".
+//
+// Cau hoi da ra cho TUNG khoa: "mot `<ref>` co the sinh ra NHIEU HON MOT lenh
+// ghi khong?" - neu co, vi se nuot lenh thu hai nhu mot lan goi lap (mat xu,
+// im lang). Tra loi o tung ham.
+// ---------------------------------------------------------------------------
+
+/** Nam thao tac vi cua mot don hang - moi thao tac toi da MOT lenh ghi/don. */
+export const ORDER_WALLET_OPS = [
+  'debit',
+  'reserve',
+  'confirm',
+  'add',
+  'cancel',
+] as const;
+export type OrderWalletOp = (typeof ORDER_WALLET_OPS)[number];
+
+// Kiem tung phan cua khoa. Khoa viet bang template literal (khong `join`) de
+// grep `:giftcard:` / `:cardorder:` ra dung hinh dang khoa.
+const assertKeyParts = (...parts: string[]): void => {
+  const context = 'service-ref.constant.assertKeyParts';
+  const bad = parts.find((p) => !p || p.includes(REF_SEPARATOR));
+  if (bad !== undefined) {
+    // Phan rong hoac chua dau phan cach ⇒ hai lenh khac nhau co the trung
+    // khoa (vd slug rong cua hai don) ⇒ vi nuot lenh sau. Hong ON AO.
+    new Logger(context).error(
+      `${context}: key part ${JSON.stringify(bad)} is empty or contains "${REF_SEPARATOR}" ` +
+        `(parts ${JSON.stringify(parts)}). Throwing 1010014 INVALID_ORDER_SLUG.`,
+    );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
+  }
+};
+
+/**
+ * `terminal:cardorder:<cardOrderSlug>:<sharedUserId>` - mot lan cong xu cua don
+ * the cho MOT nguoi.
+ *
+ * Bat buoc kem `sharedUserId` NGUOI DUOC CONG (Z-2): nhanh GIFT cong N lan cho
+ * N nguoi nhan trong vong lap cua `_generateAndRedeem`; dung chung
+ * `terminal:cardorder:<slug>` thi nguoi nhan thu 2..N bi vi nuot nhu goi lap.
+ * Mot don + mot nguoi = dung mot lenh cong (SELF: chu don; GIFT: tung nguoi
+ * nhan - mot nguoi nhan chi co mot dong `recipient` moi don).
+ */
+export function cardOrderIdempotencyKey(
+  cardOrderSlug: string,
+  sharedUserId: string,
+): string {
+  assertKeyParts(cardOrderSlug, sharedUserId);
+  return `${SERVICE_PREFIX}:cardorder:${cardOrderSlug}:${sharedUserId}`;
+}
+
+/**
+ * `terminal:giftcard:<giftCardSlug>` - mot the qua chi cong xu MOT lan (cho mot
+ * nguoi dung). Mot `<ref>` = mot lenh: the da USED thi `redeem` tu choi.
+ */
+export function giftCardIdempotencyKey(giftCardSlug: string): string {
+  assertKeyParts(giftCardSlug);
+  return `${SERVICE_PREFIX}:giftcard:${giftCardSlug}`;
+}
+
+/**
+ * `terminal:<orderSlug>:debit|confirm|add` va
+ * `terminal:<orderSlug>:reserve|cancel:<reservationSeq>` - thao tac vi cua mot
+ * don hang. Khac `orderRef()` (tham chieu mem, KHONG co hau to) -
+ * `parseOrderRef` tu choi chuoi nay.
+ *
+ * - `debit` (tra don bang xu), `confirm` (xac nhan diem da giu), `add` (cong
+ *   diem tich luy): MOT lenh moi don - don chi thanh toan mot lan; goi lai
+ *   (job thu lai) PHAI bi vi nuot.
+ * - `reserve`, `cancel`: KHONG phai mot lenh moi don. `reservePointsForOrder`
+ *   gap don da co giu diem PENDING thi huy mem ban cu roi tao RESERVE moi cho
+ *   CUNG don (doi so diem dung, hoac giu → huy → giu lai). Khoa chi theo don
+ *   thi lan giu thu hai (va lan huy thu hai) bi vi nuot nhu goi lap - cung loai
+ *   loi Z-2. Nen bat buoc kem `reservationSeq`: lan giu diem thu may cua don
+ *   (1, 2, …); `cancel` mang so cua lan giu ma no huy. (Lech chu ke hoach 5.5,
+ *   ghi 16/11/2026; 7.7 chot nguon cua so nay.)
+ */
+export function orderOpIdempotencyKey(
+  orderSlug: string,
+  op: Exclude<OrderWalletOp, 'reserve' | 'cancel'>,
+): string;
+export function orderOpIdempotencyKey(
+  orderSlug: string,
+  op: Extract<OrderWalletOp, 'reserve' | 'cancel'>,
+  reservationSeq: number,
+): string;
+export function orderOpIdempotencyKey(
+  orderSlug: string,
+  op: OrderWalletOp,
+  reservationSeq?: number,
+): string {
+  const perReservation = op === 'reserve' || op === 'cancel';
+  if (
+    perReservation !== (Number.isInteger(reservationSeq) && reservationSeq > 0)
+  ) {
+    const context = 'service-ref.constant.orderOpIdempotencyKey';
+    new Logger(context).error(
+      `${context}: op "${op}" with reservationSeq ${JSON.stringify(reservationSeq)} - ` +
+        `reserve/cancel need a positive integer, the other ops take none. ` +
+        `Throwing 1010014 INVALID_ORDER_SLUG.`,
+    );
+    throw new OrderException(OrderValidation.INVALID_ORDER_SLUG);
+  }
+  assertKeyParts(orderSlug);
+  return perReservation
+    ? `${SERVICE_PREFIX}:${orderSlug}:${op}:${reservationSeq}`
+    : `${SERVICE_PREFIX}:${orderSlug}:${op}`;
+}

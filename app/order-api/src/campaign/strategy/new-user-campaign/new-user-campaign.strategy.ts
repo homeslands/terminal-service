@@ -14,7 +14,13 @@ import { Product } from 'src/product/product.entity';
 import { DataSource, In } from 'typeorm';
 import { CampaignRecipient } from '../../entity/campaign-recipient.entity';
 import { Campaign } from '../../entity/campaign.entity';
-import { ICampaignStrategy } from '../campaign.strategy';
+import {
+  CampaignIdentities,
+  ICampaignStrategy,
+  requireCampaignIdentity,
+} from '../campaign.strategy';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
 import { NotificationService } from 'src/notification/notification.service';
 import { NotificationLanguageService } from 'src/notification/language/notification-language.service';
 import {
@@ -29,10 +35,30 @@ export class NewUserCampaignStrategy implements ICampaignStrategy {
     @Inject(WINSTON_MODULE_NEST_PROVIDER) private readonly logger: Logger,
     private readonly notificationService: NotificationService,
     private readonly notificationLanguageService: NotificationLanguageService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
-  async execute(campaign: Campaign, user: User): Promise<CampaignRecipient> {
+  async execute(
+    campaign: Campaign,
+    user: User,
+    identities?: CampaignIdentities,
+  ): Promise<CampaignRecipient> {
     const context = `${NewUserCampaignStrategy.name}.${this.execute.name}`;
+
+    // Buoc 5.6: ngon ngu thong bao lay tu shared-user, tra TRUOC lenh ghi -
+    // khong tra duoc thi bo qua nguoi nay (xem `requireCampaignIdentity`).
+    const identity = requireCampaignIdentity(
+      identities ??
+        (await batchLookupSharedUserIdentities(
+          [user.sharedUserId],
+          this.sharedUserServiceClient,
+          this.logger,
+          context,
+        )),
+      user,
+      this.logger,
+      context,
+    );
 
     let createdVoucher: Voucher;
 
@@ -127,7 +153,7 @@ export class NewUserCampaignStrategy implements ICampaignStrategy {
           voucherTitle: createdVoucher.title,
           voucherCode: createdVoucher.code,
         },
-        user.language ?? 'vi',
+        identity.language ?? 'vi',
       );
       await this.notificationService.create({
         receiverId: user.id,

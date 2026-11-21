@@ -51,6 +51,7 @@ import {
   SharedUserServiceClient,
 } from 'src/external-services/shared-user-service/shared-user-service.client';
 import { batchLookupSharedUserIdentities } from 'src/user/user.helper';
+import { mergeOrderOwnerIdentity } from 'src/order/order-owner-identity';
 
 /** Mot dong tong hop nhan vien cua ca (gom theo `order.owner`). */
 type ShiftStaffEntry = { user: User; orderCount: number; revenue: number };
@@ -543,7 +544,13 @@ export class WorkShiftService {
       workShift.id,
       workShift.branch.id,
     );
-    return this.mapper.mapArray(orders, Order, OrderResponseDto);
+    return mergeOrderOwnerIdentity(
+      orders,
+      this.mapper.mapArray(orders, Order, OrderResponseDto),
+      this.sharedUserServiceClient,
+      this.logger,
+      `${WorkShiftService.name}.${this.getOrders.name}`,
+    );
   }
 
   async getInvoices(
@@ -582,7 +589,13 @@ export class WorkShiftService {
   ): Promise<OrderResponseDto[]> {
     const ws = await this.getActiveShiftForCashier(currentUser);
     const orders = await this.getWorkShiftOrders(ws.id, ws.branch.id);
-    return this.mapper.mapArray(orders, Order, OrderResponseDto);
+    return mergeOrderOwnerIdentity(
+      orders,
+      this.mapper.mapArray(orders, Order, OrderResponseDto),
+      this.sharedUserServiceClient,
+      this.logger,
+      `${WorkShiftService.name}.${this.getCurrentOrders.name}`,
+    );
   }
 
   async getCurrentInvoices(

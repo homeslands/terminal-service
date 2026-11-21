@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { ChefOrderService } from './chef-order.service';
 import { ChefOrderController } from './chef-order.controller';
 import { ChefOrderUtils } from './chef-order.utils';
@@ -36,6 +37,9 @@ import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-poi
 
 @Module({
   imports: [
+    // Buoc 7.7c: OrderUtils.deleteOrder hoan khoa debit xu qua shared-user.
+    // Buoc 7.7d: AccumulatedPointService goi shared-user (diem tich luy).
+    SharedUserServiceModule,
     TypeOrmModule.forFeature([
       Order,
       ChefArea,

@@ -1,11 +1,14 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { signInternalRequest } from 'src/common/utils/internal-signature.util';
 import { SharedUserUnavailableException } from './shared-user-service.exception';
+import { UserException } from 'src/user/user.exception';
+import { UserValidation } from 'src/user/user.validation';
 import {
   INTERNAL_BATCH_LOOKUP_MAX,
+  INTERNAL_SEARCH_BY_PHONENUMBER_MAX,
   INTERNAL_LIST_RECENT_MAX_PAGES,
   INTERNAL_LIST_RECENT_PAGE_SIZE,
   INTERNAL_SERVICE_HEADER,
@@ -147,6 +150,94 @@ export interface SharedMembershipCard {
 }
 
 // QD22.b - `user` du shape lookup de truyen thang vao `ensureLocalUsers`.
+// Buoc 7.6 (QD10): mot dong so cai vi cua CHINH service goi, tra bang khoa
+// idempotent qua `POST /internal/balance/lookup-transaction` (dung o 6.6).
+// `type` = 'in' | 'out'; `balance` = so du ngay sau dong do.
+export interface SharedBalanceTransaction {
+  transactionId: string;
+  userId: string;
+  type: string;
+  points: number;
+  balance: number;
+  objectType: string;
+  objectId: string;
+  objectSlug: string;
+  createdAt: string;
+}
+
+// Buoc 7.7b/c: body cua `internal/balance/credit` / `debit` (shared-user
+// `CreditBalanceRequestDto`). `transactionId` = khoa idempotent
+// (`shared/constants/service-ref.constant.ts`). Dong so cai di CUNG lenh nay
+// (`objectType` / `objectId` / `objectSlug` / `desc`) - khong con lenh tao
+// dong `point_transaction` rieng. `points`: so nguyen >= 1.
+export interface SharedBalanceMoveRequest {
+  userId: string;
+  points: number;
+  transactionId: string;
+  objectType: string;
+  objectId: string;
+  objectSlug: string;
+  desc?: string;
+}
+
+// Hau to khoa cua lenh hoan (`release`) - khop `WALLET_RELEASE_SUFFIX` o
+// shared-user (`balance-internal.dto.ts`).
+export const WALLET_RELEASE_SUFFIX = ':release';
+
+// Tra loi cua credit / debit / release: so du SAU giao dich (dung luon, khong
+// doc lai). `replayed` = khoa da ghi tu truoc, lan nay khong ghi them.
+export interface SharedBalanceMove {
+  transactionId: string;
+  userId: string;
+  points: number;
+  balance: number;
+  replayed: boolean;
+  createdAt: string;
+}
+
+// Buoc 7.7d: than lenh `add` / `reserve` sang `/internal/accumulated-points/*`
+// (shared-user 6.7). `objectSlug` la slug cua don o service nay.
+export interface SharedAccumulatedPointMoveRequest {
+  userId: string;
+  points: number;
+  transactionId: string;
+  objectType: string;
+  objectId: string;
+  objectSlug: string;
+  // Chi `add`: ti le da dung de tinh `points`, luu kem dong lich su.
+  pointsPercentage?: number;
+}
+
+// Dong lich su diem shared-user vua ghi. `transactionId` la khoa cua dong:
+// khoa gui di voi add / reserve, `<khoa giu>:confirm` / `:cancel` voi hai lenh
+// kia. `replayed` = khoa da ghi tu truoc, lan nay khong doi gi.
+export interface SharedAccumulatedPointMove {
+  transactionId: string;
+  userId: string;
+  type: string;
+  status: string;
+  points: number;
+  totalPoints: number;
+  objectType: string | null;
+  objectId: string | null;
+  objectSlug: string | null;
+  expiresAt: string | null;
+  replayed: boolean;
+  createdAt: string;
+}
+
+// Buoc 7.7d (QD-T10): `/internal/balance/lookup` - so du + `slug` /
+// `createdAt` cua hang vi (null khi nguoi chua co hang vi).
+export interface SharedBalanceLookup {
+  userId: string;
+  points: number;
+  slug: string | null;
+  createdAt: string | null;
+}
+
+// Buoc 7.7d: bo loc cua nhom route "xem ho" (`/internal/point-transactions/*`).
+export type SharedPointTransactionViewRequest = Record<string, unknown>;
+
 export interface SharedMembershipCardIssued {
   cardId: string;
   code: string;
@@ -297,6 +388,41 @@ export class SharedUserServiceClient {
       `internal/users/${id}/update-identity`,
       data,
     );
+  }
+
+  // QD4 (buoc 7.1) - mang `id` cua moi nguoi co SDT CHUA chuoi `fragment`
+  // (khop chuoi con o shared-user), de loc `sharedUserId IN (...)` thay cho
+  // `Like` tren cot SDT cuc bo (cot nay bi drop o giai doan 8).
+  //
+  // CHI DE LOC danh sach - khong dung thay `lookupByPhonenumber` (khop
+  // tuyet doi) o duong ghi nao.
+  //
+  // - Vuot tran => shared-user tra 400 ma 137007; nem lai
+  //   `PHONENUMBER_SEARCH_TOO_BROAD` (400, cung ma) de UI bao "tim hep lai",
+  //   khong bao "khong co du lieu".
+  // - Loi khac (mang, 5xx, chu ky) => 503 qua `toReadError` (fail-closed: day
+  //   la bo loc chinh cua response, roi ve cot cuc bo la sai lech D9).
+  async searchIdsByPhonenumber(fragment: string): Promise<string[]> {
+    try {
+      return await this.post<string[]>('internal/users/search-by-phonenumber', {
+        phonenumber: fragment,
+        limit: INTERNAL_SEARCH_BY_PHONENUMBER_MAX,
+      });
+    } catch (error) {
+      const response = (
+        error as {
+          response?: { status?: number; data?: { statusCode?: number } };
+        }
+      )?.response;
+      if (
+        response?.status === 400 &&
+        response?.data?.statusCode ===
+          UserValidation.PHONENUMBER_SEARCH_TOO_BROAD.code
+      ) {
+        throw new UserException(UserValidation.PHONENUMBER_SEARCH_TOO_BROAD);
+      }
+      this.toReadError(error);
+    }
   }
 
   // Batch cua lookupById - dung khi terminal can ghep identity vao ca 1 trang
@@ -515,6 +641,339 @@ export class SharedUserServiceClient {
       `internal/membership-cards/${id}/remove`,
       {},
     );
+  }
+
+  // Buoc 7.7a (trend-api.md 7.4(a)): so du xu cua MOT nguoi o vi shared-user.
+  // Nguoi chua co hang vi => 0 (shared-user tu tra 0). 404 = shared-user
+  // khong co user nay => `null`, ben goi tu quyet. Loi khac => 503/162001
+  // (`toReadError`) - KHONG duoc hieu thanh "so du 0".
+  async lookupBalancePoints(userId: string): Promise<number | null> {
+    try {
+      const { points } = await this.post<{ userId: string; points: number }>(
+        'internal/balance/lookup',
+        { userId },
+      );
+      return Number(points);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Buoc 7.7d (QD-T10): ca hang vi cua MOT nguoi cho `GET /balance?userSlug=`
+  // cua nhan vien - route do giu khuon mono { slug, createdAt, points } (muc
+  // 1.4). 404 = shared-user khong co user nay => `null`. Loi khac =>
+  // 503/162001, KHONG hieu thanh "chua co vi".
+  async lookupBalance(userId: string): Promise<SharedBalanceLookup | null> {
+    try {
+      return await this.post<SharedBalanceLookup>('internal/balance/lookup', {
+        userId,
+      });
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Buoc 7.7b (trend-api.md 7.4(b)): cong xu vao vi shared-user, idempotent
+  // theo `transactionId` (goi lai cung khoa => `replayed`, khong cong them).
+  // Hong hai lan => phan dinh bang lookup-transaction (`postMoney`). 4xx (sai
+  // body, user la, khoa da dung cho giao dich khac - 409) nem nguyen loi
+  // axios: loi lap trinh, goi lai van hong.
+  creditBalance(body: SharedBalanceMoveRequest): Promise<SharedBalanceMove> {
+    return this.postMoney<SharedBalanceMove>(
+      'internal/balance/credit',
+      body,
+      (transaction) => this.moveFromLedger(transaction),
+    );
+  }
+
+  // Buoc 7.7c (trend-api.md 7.4(c), QD9): tru xu MOT nhip o vi shared-user,
+  // idempotent theo `transactionId` (`<service>:<orderSlug>:debit`). Thieu xu
+  // => shared-user tra 400/158205 (chan am o tang DB), nem nguyen loi axios.
+  debitBalance(body: SharedBalanceMoveRequest): Promise<SharedBalanceMove> {
+    return this.postMoney<SharedBalanceMove>(
+      'internal/balance/debit',
+      body,
+      (transaction) => this.moveFromLedger(transaction),
+    );
+  }
+
+  // Buoc 7.7c (Z-7): tra lai mot lan tru (`<khoa debit>` => dong cong
+  // `<khoa debit>:release`, idempotent: hoan hai lan chi tra mot lan). Hong
+  // hai lan => tra so cai bang khoa `:release` (KHONG phai khoa debit - dong
+  // debit luon co san).
+  releaseBalance(debitTransactionId: string): Promise<SharedBalanceMove> {
+    return this.postMoney<SharedBalanceMove>(
+      'internal/balance/release',
+      { transactionId: debitTransactionId },
+      (transaction) => this.moveFromLedger(transaction),
+      `${debitTransactionId}${WALLET_RELEASE_SUFFIX}`,
+    );
+  }
+
+  // Buoc 7.7c: lan tru mang khoa nay da bi hoan (Z-7) chua. Khoa da hoan thi
+  // `debit` cung khoa chi con tra `replayed` - khong tru them - nen ben goi
+  // KHONG duoc coi do la "da tra". shared-user khong tra loi => 503.
+  async isDebitReleased(debitTransactionId: string): Promise<boolean> {
+    return (
+      (await this.lookupBalanceTransaction(
+        `${debitTransactionId}${WALLET_RELEASE_SUFFIX}`,
+      )) !== null
+    );
+  }
+
+  // Buoc 7.7d (trend-api.md 7.4(d)): so diem tich luy tieu duoc ngay cua MOT
+  // nguoi (giu cho da tru san). Nguoi chua co hang diem => 0. 404 => `null`.
+  // Loi khac => 503/162001 - KHONG duoc hieu thanh "0 diem".
+  async lookupAccumulatedPoints(userId: string): Promise<number | null> {
+    try {
+      const { points } = await this.post<{ userId: string; points: number }>(
+        'internal/accumulated-points/lookup',
+        { userId },
+      );
+      return Number(points);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Buoc 7.7d: bon lenh GHI diem qua `postMoney` (goi lai mot lan; 4xx nem
+  // nguyen loi axios). shared-user chua co lookup theo khoa cho diem => hong
+  // hai lan la 503 "khong biet" (7.6); goi lai cung khoa sau do la `replayed`.
+  addAccumulatedPoints(
+    body: SharedAccumulatedPointMoveRequest,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/add',
+      body,
+    );
+  }
+
+  // Khoa MOI moi lan giu (`<service>:<orderSlug>:reserve:<seq>`). Khong gui
+  // `expiresAt` => shared-user dat 30 phut (QD11, gap doi 15 phut service tu
+  // xoa don PENDING).
+  reserveAccumulatedPoints(
+    body: SharedAccumulatedPointMoveRequest,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/reserve',
+      body,
+    );
+  }
+
+  // Hai lenh duoi nhan KHOA CUA LAN GIU; vi tu ghi `<khoa>:confirm` /
+  // `<khoa>:cancel` (lam hai lan = mot lan). 409 = giu cho khong con mo.
+  confirmAccumulatedPointsReservation(
+    reservationKey: string,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/confirm',
+      { transactionId: reservationKey },
+    );
+  }
+
+  cancelAccumulatedPointsReservation(
+    reservationKey: string,
+  ): Promise<SharedAccumulatedPointMove> {
+    return this.postMoney<SharedAccumulatedPointMove>(
+      'internal/accumulated-points/cancel-reservation',
+      { transactionId: reservationKey },
+    );
+  }
+
+  // Buoc 7.7d (QD17): nhom route "xem ho" doc tu shared-user SAU KHI service
+  // nay da kiem role (`@HasRoles`). Co `userId` => cua mot nguoi; khong co =>
+  // moi giao dich cua service nay (QD-T5). 400 cua shared-user (vd export qua
+  // so dong) => 400 kem cau cua no; loi khac => 503/162001.
+  queryPointTransactions<T>(
+    body: SharedPointTransactionViewRequest,
+  ): Promise<T> {
+    return this.readView<T>('internal/point-transactions/query', body);
+  }
+
+  analyzePointTransactions<T>(
+    body: SharedPointTransactionViewRequest,
+  ): Promise<T> {
+    return this.readView<T>('internal/point-transactions/analysis', body);
+  }
+
+  // `{ items, total }`, cu nhat truoc; ben goi dung file. Cham hon => 30 giay.
+  exportPointTransactions<T>(
+    body: SharedPointTransactionViewRequest,
+  ): Promise<T> {
+    return this.readView<T>('internal/point-transactions/export', body, 30000);
+  }
+
+  // So du lon nhat / nho nhat toan vi (man chinh sach xu).
+  analyzeBalances<T>(): Promise<T> {
+    return this.readView<T>('internal/balance/analysis', {});
+  }
+
+  private async readView<T>(
+    relativePath: string,
+    body: unknown,
+    timeoutMs?: number,
+  ): Promise<T> {
+    try {
+      return await this.post<T>(relativePath, body, timeoutMs);
+    } catch (error) {
+      const response = (
+        error as {
+          response?: { status?: number; data?: { message?: string } };
+        }
+      )?.response;
+      if (response?.status === 400) {
+        throw new BadRequestException(response.data?.message ?? 'Bad request');
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Dong so cai tim thay sau hai lan hong => tra loi nhu mot lan `replayed`.
+  private moveFromLedger(
+    transaction: SharedBalanceTransaction,
+  ): SharedBalanceMove {
+    return {
+      transactionId: transaction.transactionId,
+      userId: transaction.userId,
+      points: transaction.points,
+      balance: transaction.balance,
+      replayed: true,
+      createdAt: transaction.createdAt,
+    };
+  }
+
+  // Buoc 7.6 (QD10): dong so cai vi da ghi duoi khoa `transactionId`, hoac
+  // `null` khi chua co (404). shared-user chi tra loi khoa cua CHINH service
+  // goi - khoa mang tien to service khac cung ra 404. Moi loi khac => 503
+  // (`toReadError`). Dung trong `postMoney`; doi soat Z-8 (GD9) dung lai.
+  async lookupBalanceTransaction(
+    transactionId: string,
+  ): Promise<SharedBalanceTransaction | null> {
+    try {
+      return await this.post<SharedBalanceTransaction>(
+        'internal/balance/lookup-transaction',
+        { transactionId },
+      );
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  /**
+   * Buoc 7.6 (QD10) - lenh GHI tien / diem sang shared-user. CHUA AI GOI: buoc
+   * 7.7 doi tung cho goi vi / diem sang day.
+   *
+   * - Goi lai **dung mot lan** khi shared-user khong tra loi duoc: timeout,
+   *   mat mang (loi khong co `response`), hoac 5xx. Body giu nguyen => cung
+   *   khoa idempotent => lan goi lai vo hai (lan dau da ghi thi shared-user
+   *   tra `replayed: true`, khong ghi them). `post` ky HMAC lai voi timestamp
+   *   moi.
+   * - **Khong** goi lai 4xx: loi cua chinh request (thieu xu, sai khoa, sai
+   *   chu ky...), goi lai van hong. Nem nguyen loi axios - ben goi doc
+   *   `response.status` / `message` nhu moi ham GHI khac.
+   * - **Giu `timeout: 5000`** (mac dinh cua `post`): rut ngan chi de ra them
+   *   trang thai "da ghi hay chua?", ma mo ho ve tien dat hon cham ve tien.
+   * - Hong lan hai:
+   *   - co `fromLedger` (route vi `internal/balance/*`): hoi
+   *     `lookup-transaction` bang CHINH khoa de **phan dinh**:
+   *     - thay dong so cai => lenh DA GHI => tra `fromLedger(dong do)`;
+   *     - 404 => CHUA ghi => nem 503 (162001). Neu lenh dau van dang chay va
+   *       ghi muon hon, lan goi lai sau (job.recovery, doi soat Z-8) cung khoa
+   *       se thanh `replayed` - khong ghi hai lan;
+   *     - lookup cung hong => KHONG BIET => log loi kem khoa, nem 503.
+   *   - khong co `fromLedger` (route diem - shared-user chua co lookup theo
+   *     khoa cho diem): nem 503, ben goi coi nhu "khong biet".
+   *
+   * Quyet dinh nghiep vu sau do (chan chot don, bu tru Z-7...) la cua ben goi
+   * theo chinh sach 7.3 (QD6/QD7/QD8), khong nam o day.
+   */
+  private async postMoney<T>(
+    relativePath: string,
+    body: { transactionId: string },
+    fromLedger?: (transaction: SharedBalanceTransaction) => T,
+    // Buoc 7.7c: khoa cua DONG SO CAI ma lenh nay ghi - mac dinh la
+    // `transactionId`; `release` ghi duoi `<khoa debit>:release`.
+    ledgerKey: string = body.transactionId,
+  ): Promise<T> {
+    const key = body.transactionId;
+    const describe = (error: unknown): string => {
+      const err = error as {
+        response?: { status?: number };
+        code?: string;
+        message?: string;
+      };
+      return `status=${err?.response?.status ?? '-'} code=${err?.code ?? '-'} ${err?.message ?? ''}`;
+    };
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        return await this.post<T>(relativePath, body);
+      } catch (error) {
+        const status = (error as { response?: { status?: number } })?.response
+          ?.status;
+        // Co response va < 500 => 4xx: loi cua request, khong goi lai.
+        // Buoc 7.7b: ghi lai kem khoa truoc khi nem (4xx cua lenh tien la
+        // dau vet doi soat; vd 409 = khoa da dung cho giao dich khac).
+        if (status !== undefined && status < 500) {
+          this.logger.warn(
+            `shared-user money write refused (not retried): path=${relativePath} key=${key} ${describe(error)}`,
+          );
+          throw error;
+        }
+        // Khong response (timeout ECONNABORTED, ECONNREFUSED, ECONNRESET...)
+        // hoac 5xx => shared-user khong tra loi duoc => goi lai mot lan.
+        this.logger.warn(
+          `shared-user money write attempt ${attempt}/2 failed: path=${relativePath} key=${key} ${describe(error)}`,
+        );
+      }
+    }
+
+    if (!fromLedger) {
+      this.logger.error(
+        `shared-user money write failed twice, no lookup by key for this route - outcome UNKNOWN: path=${relativePath} key=${key}`,
+      );
+      throw new SharedUserUnavailableException();
+    }
+
+    let transaction: SharedBalanceTransaction | null;
+    try {
+      transaction = await this.lookupBalanceTransaction(ledgerKey);
+    } catch (error) {
+      this.logger.error(
+        `shared-user money write failed twice and lookup-transaction failed too - outcome UNKNOWN, reconcile by key: path=${relativePath} key=${key} ledgerKey=${ledgerKey} ${describe(error)}`,
+      );
+      throw new SharedUserUnavailableException();
+    }
+    if (!transaction) {
+      this.logger.error(
+        `shared-user money write failed twice, lookup-transaction says NOT written yet (a write held up at shared-user can still land after this lookup - reconcile by key): path=${relativePath} key=${key} ledgerKey=${ledgerKey}`,
+      );
+      throw new SharedUserUnavailableException();
+    }
+    this.logger.warn(
+      `shared-user money write failed twice but lookup-transaction found it WRITTEN: path=${relativePath} key=${key} balance=${transaction.balance}`,
+    );
+    return fromLedger(transaction);
   }
 
   // Moi path, ke ca /internal/*, deu mang tien to api/${version} - phai

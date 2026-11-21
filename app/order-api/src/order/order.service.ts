@@ -91,6 +91,9 @@ import {
   isDefaultCustomer,
 } from 'src/user/user.constant';
 import { orderRef } from 'src/shared/constants/service-ref.constant';
+import { PaymentMethod } from 'src/payment/payment.constants';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { mergeOrderOwnerIdentity } from './order-owner-identity';
 @Injectable()
 export class OrderService {
   constructor(
@@ -122,6 +125,7 @@ export class OrderService {
     private readonly notificationUtils: NotificationUtils,
     private readonly printerProducer: PrinterProducer,
     private readonly chefOrderUtils: ChefOrderUtils,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
     private readonly invoiceService: InvoiceService,
     @InjectRepository(WorkShift)
     private readonly workShiftRepository: Repository<WorkShift>,
@@ -233,6 +237,14 @@ export class OrderService {
           orderRef(order.slug),
           null,
         );
+        // Buoc 7.7c: nhu `OrderUtils.deleteOrder` - don tra bang xu con PENDING co
+        // the DA bi tru; hoan khoa debit truoc khi xoa (helper dung chung).
+        if (payment?.paymentMethod === PaymentMethod.POINT) {
+          await this.orderUtils.releaseXuDebitOfDeletedOrder(
+            order.slug,
+            context,
+          );
+        }
         // Update subtotal and accumulated points to use in order
         const subtotalBeforeUseAccumulatedPoints =
           order.subtotal + order.accumulatedPointsToUse;
@@ -490,7 +502,15 @@ export class OrderService {
       },
     );
 
-    return this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [updatedOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   async updateVoucherOrder(
@@ -718,7 +738,15 @@ export class OrderService {
       },
     );
 
-    return this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [updatedOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   async updateOwnerOrder(
@@ -749,6 +777,29 @@ export class OrderService {
 
     const ownerIdentity = await this.userActiveChecker.assertActive(owner);
     checkUserRequirement(ownerIdentity?.userRequirements);
+
+    // Buoc 7.5b (`issuses/order-owner-change-keeps-point-reservation.md`): doi
+    // chu don thi HUY giu cho diem cua chu CU truoc. Khong huy thi luc chot don
+    // `confirmPointsUsage` (tim giu cho theo don) tru diem chu cu, con
+    // `addPointsForOrder` cong diem cho chu moi.
+    // - Hoan `subtotal` giong route huy giu cho (`cancelReservation`): luc ap
+    //   diem, giu cho da tru so diem do khoi `subtotal`.
+    // - Chi lam khi chu THAT SU doi: chon lai dung chu cu khong duoc lam mat
+    //   diem khach vua ap.
+    // - Khong cung transaction voi lenh luu chu moi ben duoi (`handleCancelReservation`
+    //   ghi bang repository rieng; tu 7.7d la lenh goi sang shared-user). Luu
+    //   hong thi giu cho da huy ma don con `accumulatedPointsToUse`; doi chu lai
+    //   lan nua se lanh (khong con giu cho de huy, chi hoan `subtotal`).
+    if (order.owner?.id !== owner.id) {
+      await this.accumulatedPointService.handleCancelReservation(
+        orderRef(order.slug),
+        null,
+      );
+      if (order.accumulatedPointsToUse > 0) {
+        order.subtotal += order.accumulatedPointsToUse;
+        order.accumulatedPointsToUse = 0;
+      }
+    }
 
     const previousVoucher = order.voucher;
     if (previousVoucher) {
@@ -811,7 +862,15 @@ export class OrderService {
       },
     );
 
-    return this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [updatedOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   async updateVoucherOrderPublic(
@@ -1036,7 +1095,15 @@ export class OrderService {
       },
     );
 
-    return this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [updatedOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   /**
@@ -1216,7 +1283,15 @@ export class OrderService {
       await this.chefOrderUtils.createChefOrder(createdOrder.id, false);
     }
 
-    return this.mapper.map(createdOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(createdOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [createdOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   /**
@@ -1383,7 +1458,15 @@ export class OrderService {
       },
     );
 
-    return this.mapper.map(createdOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(createdOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [createdOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   /**
@@ -1782,6 +1865,7 @@ export class OrderService {
   async getAllOrders(
     options: GetOrderRequestDto,
   ): Promise<AppPaginatedResponseDto<OrderResponseDto>> {
+    const context = `${OrderService.name}.${this.getAllOrders.name}`;
     const findOptionsWhere: FindOptionsWhere<Order> = {
       branch: {
         slug: options.branch,
@@ -1880,7 +1964,13 @@ export class OrderService {
     //   mapFrom((source: any) => source.printerInvoices),
     // )
     // squeeze type any
-    const ordersDto = this.mapper.mapArray(orders, Order, OrderResponseDto);
+    const ordersDto = await mergeOrderOwnerIdentity(
+      orders,
+      this.mapper.mapArray(orders, Order, OrderResponseDto),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
     const page = options.hasPaging ? options.page : 1;
     const pageSize = options.hasPaging ? options.size : total;
 
@@ -1944,6 +2034,7 @@ export class OrderService {
   }
 
   async getAllOrdersBySlugArray(data: string[]): Promise<OrderResponseDto[]> {
+    const context = `${OrderService.name}.${this.getAllOrdersBySlugArray.name}`;
     const orders = await this.orderRepository.find({
       where: { slug: In(data) },
       relations: [
@@ -1961,7 +2052,13 @@ export class OrderService {
       ],
       order: { createdAt: 'DESC' },
     });
-    return this.mapper.mapArray(orders, Order, OrderResponseDto);
+    return mergeOrderOwnerIdentity(
+      orders,
+      this.mapper.mapArray(orders, Order, OrderResponseDto),
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
   }
 
   /**
@@ -1971,6 +2068,7 @@ export class OrderService {
    * @throws {OrderException} If order is not found
    */
   async getOrderBySlug(slug: string): Promise<OrderResponseDto> {
+    const context = `${OrderService.name}.${this.getOrderBySlug.name}`;
     // const order = await this.orderUtils.getOrder({ where: { slug } });
     const order = await this.orderRepository.findOne({
       where: { slug },
@@ -1995,6 +2093,13 @@ export class OrderService {
       },
     });
     const orderDto = this.mapper.map(order, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [order],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
     // const orderItems = this.getOrderItemsStatuses(orderDto);
     // orderDto.orderItems = orderItems;
     return orderDto;
@@ -2031,9 +2136,18 @@ export class OrderService {
   async getActiveOrderByTable(
     tableSlug: string,
   ): Promise<OrderResponseDto | null> {
+    const context = `${OrderService.name}.${this.getActiveOrderByTable.name}`;
     const order = await this.orderUtils.getActiveOrderByTable(tableSlug);
     if (!order) return null;
-    return this.mapper.map(order, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(order, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [order],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   async callCustomerToGetOrder(createdById: string, slug: string) {
@@ -2115,7 +2229,15 @@ export class OrderService {
       },
     );
 
-    return this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    const orderDto = this.mapper.map(updatedOrder, Order, OrderResponseDto);
+    await mergeOrderOwnerIdentity(
+      [updatedOrder],
+      [orderDto],
+      this.sharedUserServiceClient,
+      this.logger,
+      context,
+    );
+    return orderDto;
   }
 
   async getVatLink(orderSlug: string): Promise<string> {

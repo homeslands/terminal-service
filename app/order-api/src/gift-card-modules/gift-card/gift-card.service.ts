@@ -21,16 +21,11 @@ import { GenGiftCardDto } from './dto/gen-gift-card.dto';
 import { GiftCardResponseDto } from './dto/gift-card-response.dto';
 import { CreateGiftCardDto } from './dto/create-gift-card.dto';
 import { User } from 'src/user/user.entity';
-import {
-  PointTransactionObjectTypeEnum,
-  PointTransactionTypeEnum,
-} from '../point-transaction/entities/point-transaction.enum';
+import { PointTransactionObjectTypeEnum } from '../point-transaction/entities/point-transaction.enum';
 import moment from 'moment';
 import { AuthException } from 'src/auth/auth.exception';
 import { AuthValidation } from 'src/auth/auth.validation';
-import { SharedBalanceService } from 'src/shared/services/shared-balance.service';
-import { SharedPointTransactionService } from 'src/shared/services/shared-point-transaction.service';
-import { CreatePointTransactionPayload } from 'src/shared/interfaces/commons/shared-point-transaction.interface';
+import { giftCardIdempotencyKey } from 'src/shared/constants/service-ref.constant';
 import { FindAllGiftCardDto } from './dto/find-all-gift-card.dto';
 import { createSortOptions } from 'src/shared/utils/obj.util';
 import { AppPaginatedResponseDto } from 'src/app/app.dto';
@@ -68,8 +63,8 @@ export class GiftCardService {
     private readonly transactionService: TransactionManagerService,
     // private readonly balanceService: BalanceService,
     // private readonly ptService: PointTransactionService,
-    private readonly balanceService: SharedBalanceService,
-    private readonly ptService: SharedPointTransactionService,
+    // Buoc 7.7b: bo SharedBalanceService + SharedPointTransactionService - cong
+    // xu va dong so cai di qua `sharedUserServiceClient.creditBalance`.
     // Buoc 3.4 - `usedBy.isActive` lay tu shared-user (applyNestedUserFlags).
     private readonly sharedUserServiceClient: SharedUserServiceClient,
     // Buoc 5.4 (5-b) - luat tran so du goi chung, khong viet lap o `redeem`.
@@ -111,27 +106,20 @@ export class GiftCardService {
     // cong xu cho khong ai.
     const sharedUserId = assertUserKeyLoaded(gc.usedBy?.sharedUserId, context);
 
-    // Update recipient balance ONCE after all cards
-    // Buoc 5.5: doi dich o 7.7 ⇒ gui kem giftCardIdempotencyKey(<slug the qua>) (`shared/constants/service-ref.constant.ts`).
-    await this.balanceService.calcBalance({
-      sharedUserId,
+    // Buoc 7.7b (trend-api.md 7.4(b)): cong xu vao vi shared-user - MOT lenh
+    // mang ca dong so cai (objectType/objectId/objectSlug/desc) va tra so du
+    // sau khi cong: khong con luot doc-sau-cong, khong con lenh tao dong
+    // `point_transaction` rieng. Khoa giftCardIdempotencyKey(<slug the>): mot the cong
+    // mot lan (`redeem` cung tu choi the da USED).
+    await this.sharedUserServiceClient.creditBalance({
+      userId: sharedUserId,
       points: gc.cardPoints,
-      type: PointTransactionTypeEnum.IN,
-    });
-
-    const currentBalance = await this.balanceService.findOneByField({ sharedUserId, slug: null })
-
-    // Create transaction record
-    await this.ptService.create({
-      type: PointTransactionTypeEnum.IN,
-      desc: `Sử dụng thẻ quà tặng ${gc.cardPoints.toLocaleString()} xu`,
+      transactionId: giftCardIdempotencyKey(gc.slug),
       objectType: PointTransactionObjectTypeEnum.GIFT_CARD,
+      objectId: gc.id,
       objectSlug: gc.slug,
-      points: gc.cardPoints,
-      sharedUserId,
-      balance: currentBalance.points
-    } satisfies CreatePointTransactionPayload);
-
+      desc: `Sử dụng thẻ quà tặng ${gc.cardPoints.toLocaleString()} xu`,
+    });
 
     const response = this.mapper.map(gc, GiftCard, GiftCardResponseDto);
     assignNestedUserFlags(

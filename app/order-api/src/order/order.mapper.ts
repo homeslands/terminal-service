@@ -4,6 +4,7 @@ import {
   forMember,
   mapFrom,
   Mapper,
+  MappingConfiguration,
   mapWith,
 } from '@automapper/core';
 import { AutomapperProfile, InjectMapper } from '@automapper/nestjs';
@@ -11,7 +12,9 @@ import { Injectable } from '@nestjs/common';
 import { Order } from './order.entity';
 import {
   ApprovalUserResponseDto,
+  ChefOrderNestedOrderResponseDto,
   CreateOrderRequestDto,
+  OrderBaseResponseDto,
   OrderResponseDto,
   OrderTableResponseDto,
   OwnerResponseDto,
@@ -29,6 +32,35 @@ import { RoleResponseDto } from 'src/role/role.dto';
 import { Role } from 'src/role/role.entity';
 import { Address } from 'src/google-map/entities/address.entity';
 import { AddressResponseDto } from 'src/google-map/dto/google-map.response.dto';
+
+// Buoc 7.4 (QD5) - member chung cua moi DTO don hang (`OrderBaseResponseDto`),
+// dung cho ca `OrderResponseDto` lan `ChefOrderNestedOrderResponseDto`. Them
+// member o day la them cho ca hai - hai shape khong lech nhau ngoai
+// `owner` / `approvalBy`.
+const orderBaseMembers = <
+  TDestination extends OrderBaseResponseDto,
+>(): MappingConfiguration<Order, TDestination>[] => [
+  forMember<Order, TDestination>(
+    (destination) => destination.orderItems,
+    mapWith(OrderItemResponseDto, OrderItem, (source) => source.orderItems),
+  ),
+  forMember<Order, TDestination>(
+    (destination) => destination.voucher,
+    mapWith(VoucherResponseDto, Voucher, (source) => source.voucher),
+  ),
+  forMember<Order, TDestination>(
+    (destination) => destination.chefOrders,
+    mapWith(ChefOrderResponseDto, ChefOrder, (source) => source.chefOrders),
+  ),
+  forMember<Order, TDestination>(
+    (destination) => destination.printerInvoices,
+    mapFrom((source: any) => source.printerInvoices),
+  ),
+  forMember<Order, TDestination>(
+    (destination) => destination.deliveryTo,
+    mapWith(AddressResponseDto, Address, (source) => source.deliveryTo),
+  ),
+];
 
 @Injectable()
 export class OrderProfile extends AutomapperProfile {
@@ -50,34 +82,16 @@ export class OrderProfile extends AutomapperProfile {
           (destination) => destination.approvalBy,
           mapWith(ApprovalUserResponseDto, User, (source) => source.approvalBy),
         ),
-        forMember(
-          (destination) => destination.orderItems,
-          mapWith(
-            OrderItemResponseDto,
-            OrderItem,
-            (source) => source.orderItems,
-          ),
-        ),
-        forMember(
-          (destination) => destination.voucher,
-          mapWith(VoucherResponseDto, Voucher, (source) => source.voucher),
-        ),
-        forMember(
-          (destination) => destination.chefOrders,
-          mapWith(
-            ChefOrderResponseDto,
-            ChefOrder,
-            (source) => source.chefOrders,
-          ),
-        ),
-        forMember(
-          (destination) => destination.printerInvoices,
-          mapFrom((source: any) => source.printerInvoices),
-        ),
-        forMember(
-          (destination) => destination.deliveryTo,
-          mapWith(AddressResponseDto, Address, (source) => source.deliveryTo),
-        ),
+        ...orderBaseMembers<OrderResponseDto>(),
+        extend(baseMapper(mapper)),
+      );
+
+      // Buoc 7.4 (QD5): `order` long trong DTO bep - khong `owner`/`approvalBy`.
+      createMap(
+        mapper,
+        Order,
+        ChefOrderNestedOrderResponseDto,
+        ...orderBaseMembers<ChefOrderNestedOrderResponseDto>(),
         extend(baseMapper(mapper)),
       );
 

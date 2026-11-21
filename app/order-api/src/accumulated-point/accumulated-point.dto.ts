@@ -145,6 +145,16 @@ export interface IAddPointsDto {
    */
   sharedUserId: string;
   orderId: string;
+  /** Buoc 7.7d: slug don - khoa `add` va tham chieu mem ben vi. */
+  orderSlug: string;
+  /**
+   * Buoc 7.7d: so diem DA TINH o cho goi (`floor(tong don x ti le / 100)`, ti
+   * le trong `system_config` cua service nay) - `/add` cua shared-user khong
+   * nhan ti le (QD-T4). Thay cho `orderTotal` (da bo): truoc 7.7d `points` la
+   * field chet (cho goi truyen `order.payment?.amount`, than ham chi doc
+   * `orderTotal`).
+   */
   points: number;
-  orderTotal: number;
+  /** Ti le da dung, luu kem dong lich su de doi soat (vi khong nhan lai). */
+  pointsPercentage?: number;
 }

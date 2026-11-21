@@ -8,7 +8,10 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
 import { CoinPolicy } from 'src/gift-card-modules/coin-policy/entities/coin-policy.entity';
 import { CoinPolicyKeyEnum } from 'src/gift-card-modules/coin-policy/coin-policy.enum';
 import { IsMaxBalancePayload } from '../interfaces/commons/shared-coin-policy.interface';
-import { SharedBalanceService } from './shared-balance.service';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { BalanceException } from 'src/gift-card-modules/balance/balance.exception';
+import { BalanceValidation } from 'src/gift-card-modules/balance/balance.validation';
+import { assertUserKeyLoaded } from 'src/user/user.constant';
 
 @Injectable()
 export class SharedCoinPolicyService {
@@ -20,7 +23,9 @@ export class SharedCoinPolicyService {
     @Inject(WINSTON_MODULE_NEST_PROVIDER)
     private readonly logger: Logger,
     private readonly transactionService: TransactionManagerService,
-    private readonly balanceService: SharedBalanceService,
+    // Buoc 7.7a: doc so du qua shared-user, KHONG con phu thuoc
+    // `SharedBalanceService` (GD8 xoa no, coin-policy o lai).
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) { }
 
   async isExceedBalance(payload: IsMaxBalancePayload) {
@@ -32,13 +37,18 @@ export class SharedCoinPolicyService {
     if (!policy?.isActive) return false;
 
     // Buoc 5.4 (5-b): CHO DOC SO DU DUY NHAT cua luat tran (don the + dung the
-    // qua deu goi ham nay). Doi dich o 7.7 (QD-T2): doc so du tu vi o shared-user.
-    // Tran (`coin_policy`) van la luat cua terminal, khong doi cho.
-    const balance = await this.balanceService.findOneByField({
-      sharedUserId: payload.sharedUserId,
-      slug: null,
-    });
-    const newBalance = +balance.points + payload.totalPoints;
+    // qua deu goi ham nay). Buoc 7.7a: so du doc tu vi o shared-user
+    // (`/internal/balance/lookup`). Tran (`coin_policy`) van la luat cua
+    // terminal, khong doi cho. shared-user khong tra loi => 503 (fail-closed:
+    // khong biet so du thi khong cho vuot tran mot cach mu).
+    const context = `${SharedCoinPolicyService.name}.${this.isExceedBalance.name}`;
+    const points = await this.sharedUserServiceClient.lookupBalancePoints(
+      assertUserKeyLoaded(payload.sharedUserId, context),
+    );
+    if (points === null) {
+      throw new BalanceException(BalanceValidation.BALANCE_NOT_FOUND);
+    }
+    const newBalance = points + payload.totalPoints;
     const maxBalance = +policy.value;
     return newBalance > maxBalance;
   }

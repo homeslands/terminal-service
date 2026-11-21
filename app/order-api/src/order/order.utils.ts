@@ -26,7 +26,12 @@ import {
 import { Invoice } from 'src/invoice/invoice.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
-import { orderRef } from 'src/shared/constants/service-ref.constant';
+import {
+  orderOpIdempotencyKey,
+  orderRef,
+} from 'src/shared/constants/service-ref.constant';
+import { SharedUserServiceClient } from 'src/external-services/shared-user-service/shared-user-service.client';
+import { PaymentMethod } from 'src/payment/payment.constants';
 
 @Injectable()
 export class OrderUtils {
@@ -41,6 +46,7 @@ export class OrderUtils {
     private readonly paymentUtils: PaymentUtils,
     private readonly eventEmitter: EventEmitter2,
     private readonly accumulatedPointService: AccumulatedPointService,
+    private readonly sharedUserServiceClient: SharedUserServiceClient,
   ) {}
 
   async getOrder(options: FindOneOptions<Order>) {
@@ -207,6 +213,15 @@ export class OrderUtils {
         await this.accumulatedPointService.handleCancelReservation(
           orderRef(order.slug),
         );
+        // Buoc 7.7c: don tra bang xu bi xoa khi con PENDING co the DA bi tru
+        // - job dung sau `debit` ma release hong, hoac `lookup-transaction`
+        // ve 404 truoc khi `debit` commit (shared-user treo roi tinh lai, cac
+        // request bi giu chay cung luc). Hoan khoa debit TRUOC khi xoa.
+        // shared-user khong tra loi => nem ngay trong transaction xoa: don
+        // KHONG bi xoa, xoa tay / job.recovery xu ly sau.
+        if (payment?.paymentMethod === PaymentMethod.POINT) {
+          await this.releaseXuDebitOfDeletedOrder(order.slug, context);
+        }
         // Update subtotal and accumulated points to use in order
         const subtotalBeforeUseAccumulatedPoints =
           order.subtotal + order.accumulatedPointsToUse;
@@ -264,6 +279,36 @@ export class OrderUtils {
       },
     );
     return removedOrder;
+  }
+
+  // Buoc 7.7c: hoan lan tru xu (khoa `<svc>:<slug>:debit`) cua don sap bi xoa.
+  // Idempotent: hoan hai lan chi tra mot lan. Chua tru => shared-user 404 =>
+  // khong co gi de hoan. Loi khac => nem (bao `deleteOrder` dung lai).
+  // Public: `OrderService.handleDeleteOrder` (route DELETE /orders/:slug, ban chep
+  // cua `deleteOrder`) goi lai cung helper nay.
+  async releaseXuDebitOfDeletedOrder(
+    orderSlug: string,
+    context: string,
+  ): Promise<void> {
+    const key = orderOpIdempotencyKey(orderSlug, 'debit');
+    try {
+      const released = await this.sharedUserServiceClient.releaseBalance(key);
+      this.logger.warn(
+        `Order ${orderSlug} deleted while PENDING after its xu debit - released ${released.points} xu (key ${released.transactionId}, balance ${released.balance}${released.replayed ? ', replayed' : ''})`,
+        context,
+      );
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        this.logger.log(
+          `Order ${orderSlug}: no xu debit under ${key}, nothing to release`,
+          context,
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   async getMinAndMaxReferenceNumberForBranch(

@@ -39,8 +39,6 @@ import { Menu } from 'src/menu/menu.entity';
 import { MenuUtils } from 'src/menu/menu.utils';
 import { Voucher } from 'src/voucher/entity/voucher.entity';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
-import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
-import { AccumulatedPointTransactionHistory } from 'src/accumulated-point/entities/accumulated-point-transaction-history.entity';
 import { CreditCardStrategy } from './strategy/credit-card.strategy';
 import { PrinterConnectorModule } from 'src/printer-connector/printer-connector.module';
 import { Printer } from 'src/printer/entity/printer.entity';
@@ -70,8 +68,6 @@ import { WorkShift } from 'src/work-shift/work-shift.entity';
       MenuItem,
       Menu,
       Voucher,
-      AccumulatedPoint,
-      AccumulatedPointTransactionHistory,
       Printer,
       WorkShift,
     ]),

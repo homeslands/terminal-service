@@ -8,6 +8,7 @@ import { UserException } from 'src/user/user.exception';
 import { UserValidation } from 'src/user/user.validation';
 import {
   INTERNAL_BATCH_LOOKUP_MAX,
+  INTERNAL_SEARCH_BY_BIRTHDAY_MAX,
   INTERNAL_SEARCH_BY_PHONENUMBER_MAX,
   INTERNAL_LIST_RECENT_MAX_PAGES,
   INTERNAL_LIST_RECENT_PAGE_SIZE,
@@ -402,6 +403,39 @@ export class SharedUserServiceClient {
   //   khong bao "khong co du lieu".
   // - Loi khac (mang, 5xx, chu ky) => 503 qua `toReadError` (fail-closed: day
   //   la bo loc chinh cua response, roi ve cot cuc bo la sai lech D9).
+  // Buoc 8.1 - mang `id` cua moi nguoi co ngay sinh (bo qua nam) trong
+  // khoang [from, to] theo do min `type` (`day_month` => "DD/MM", `day` /
+  // `month` => so). Thay cho loc `dobDM` / `dob` tren cot cuc bo (doi ten o
+  // 8.9). Ben goi loc `sharedUserId IN (...)`.
+  // - Vuot tran => 400 ma 137008 `BIRTHDAY_SEARCH_TOO_BROAD` ("tim hep lai").
+  // - Loi khac => 503 qua `toReadError` (fail-closed: day la bo loc chinh).
+  async searchIdsByBirthday(range: {
+    type: 'day' | 'month' | 'day_month';
+    from?: string;
+    to?: string;
+  }): Promise<string[]> {
+    try {
+      return await this.post<string[]>('internal/users/by-birthday', {
+        ...range,
+        limit: INTERNAL_SEARCH_BY_BIRTHDAY_MAX,
+      });
+    } catch (error) {
+      const response = (
+        error as {
+          response?: { status?: number; data?: { statusCode?: number } };
+        }
+      )?.response;
+      if (
+        response?.status === 400 &&
+        response?.data?.statusCode ===
+          UserValidation.BIRTHDAY_SEARCH_TOO_BROAD.code
+      ) {
+        throw new UserException(UserValidation.BIRTHDAY_SEARCH_TOO_BROAD);
+      }
+      this.toReadError(error);
+    }
+  }
+
   async searchIdsByPhonenumber(fragment: string): Promise<string[]> {
     try {
       return await this.post<string[]>('internal/users/search-by-phonenumber', {
@@ -741,6 +775,31 @@ export class SharedUserServiceClient {
         { userId },
       );
       return Number(points);
+    } catch (error) {
+      if (
+        (error as { response?: { status?: number } })?.response?.status === 404
+      ) {
+        return null;
+      }
+      this.toReadError(error);
+    }
+  }
+
+  // Buoc 8.5: lich su diem "xem ho" (QD17) cua MOT nguoi - ban noi bo cua
+  // GET /accumulated-point/history ben shared-user (cung bo loc, cung shape
+  // trang). Khong co nguoi do o shared-user (404) => `null`. Loi khac =>
+  // 503/162001 - KHONG duoc hieu thanh "lich su rong".
+  async pointsHistoryAccumulatedPoints<T>(body: {
+    userId: string;
+    types: string[];
+    fromDate?: string;
+    toDate?: string;
+    hasPaging?: boolean;
+    page?: number;
+    size?: number;
+  }): Promise<T | null> {
+    try {
+      return await this.post<T>('internal/accumulated-points/history', body);
     } catch (error) {
       if (
         (error as { response?: { status?: number } })?.response?.status === 404

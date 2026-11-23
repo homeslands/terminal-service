@@ -98,11 +98,18 @@ export class UserGroupService {
         name: Like(`%${query.name}%`),
       };
     }
+    // Buoc 8.2 - SDT (khop tuyet doi, nhu cu) tra o shared-user, roi loc nhom
+    // theo `sharedUserId` cua thanh vien: cot SDT cuc bo doi ten o 8.9, loc
+    // tren no se tra rong im lang. Khong ai co SDT do => khong nhom nao (`In([])`
+    // = `0=1`); shared-user khong tra loi => 503 (fail-closed).
     if (query.phoneNumber) {
+      const identity = await this.sharedUserServiceClient.lookupByPhonenumber(
+        query.phoneNumber,
+      );
       findManyOptions.where = {
         ...whereOptions,
         userGroupMembers: {
-          user: { phonenumber: query.phoneNumber },
+          user: { sharedUserId: In(identity ? [identity.id] : []) },
         },
       };
     }

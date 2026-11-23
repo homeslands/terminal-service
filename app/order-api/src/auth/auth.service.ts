@@ -128,26 +128,39 @@ export class AuthService {
     // boolean (muc 1.4). Co identity thi ghi de ben duoi.
     dto.isVerifiedEmail = false;
     dto.isVerifiedPhonenumber = false;
+    // Buoc 8.3: bo gia tri identity ma mapper vua chep tu cot cuc bo (doi ten
+    // o 8.9) - nhanh fail-open ben duoi khong con tra "cache cuc bo" nua, ma
+    // tra ho so khong co cac field do (dung hinh dang sau 8.8). Co identity
+    // thi ghi de ngay sau.
+    Object.assign(dto, {
+      phonenumber: undefined,
+      firstName: undefined,
+      lastName: undefined,
+      dob: undefined,
+      email: undefined,
+      address: undefined,
+      image: undefined,
+      language: undefined,
+    });
     try {
       const identity = await this.sharedUserServiceClient.lookupById(
         user.sharedUserId,
       );
       if (identity) {
         Object.assign(dto, {
-          phonenumber: identity.phonenumber ?? dto.phonenumber,
-          firstName: identity.firstName ?? dto.firstName,
-          lastName: identity.lastName ?? dto.lastName,
-          dob: identity.dob ?? dto.dob,
-          email: identity.email ?? dto.email,
-          address: identity.address ?? dto.address,
-          image: identity.image ?? dto.image,
+          // Buoc 8.3: identity CHI lay tu shared-user, khong rot ve cot cuc bo.
+          phonenumber: identity.phonenumber,
+          firstName: identity.firstName,
+          lastName: identity.lastName,
+          dob: identity.dob,
+          email: identity.email,
+          address: identity.address,
+          image: identity.image,
           // Ngon ngu cung la identity (architect-http.md muc 1.6): doi o
-          // service nay thi service kia phai thay - doc cot cuc bo la tra
-          // ban cu cua rieng service do.
-          language: identity.language ?? dto.language,
-          isVerifiedEmail: identity.isVerifiedEmail ?? dto.isVerifiedEmail,
-          isVerifiedPhonenumber:
-            identity.isVerifiedPhonenumber ?? dto.isVerifiedPhonenumber,
+          // service nay thi service kia phai thay.
+          language: identity.language,
+          isVerifiedEmail: identity.isVerifiedEmail ?? false,
+          isVerifiedPhonenumber: identity.isVerifiedPhonenumber ?? false,
           userRequirements: toUserRequirementResponses(
             identity.userRequirements,
           ),
@@ -159,7 +172,7 @@ export class AuthService {
       // cuc bo. Chap nhan duoc vi phep CHAN that nam o duong len don/thanh
       // toan va cho do fail-closed (`assertActive` nem 503).
       this.logger.warn(
-        `Failed to enrich profile identity from shared-user, falling back to local cache: ${error?.message}`,
+        `Failed to enrich profile identity from shared-user, identity fields left empty: ${error?.message}`,
         context,
       );
     }

@@ -35,8 +35,6 @@ import { ACBConnectorModule } from 'src/acb-connector/acb-connector.module';
 import { ACBConnectorConfig } from 'src/acb-connector/acb-connector.entity';
 import { Invoice } from 'src/invoice/invoice.entity';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
-import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
-import { AccumulatedPointTransactionHistory } from 'src/accumulated-point/entities/accumulated-point-transaction-history.entity';
 import { TransactionManagerService } from 'src/db/transaction-manager.service';
 
 @Module({
@@ -61,8 +59,6 @@ import { TransactionManagerService } from 'src/db/transaction-manager.service';
       Payment,
       ACBConnectorConfig,
       Invoice,
-      AccumulatedPoint,
-      AccumulatedPointTransactionHistory,
     ]),
     FileModule,
     MenuModule,

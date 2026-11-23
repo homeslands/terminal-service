@@ -1,12 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  Repository,
-  In,
-  FindOptionsWhere,
-  FindManyOptions,
-  Like,
-} from 'typeorm';
+import { Repository, In, FindOptionsWhere, FindManyOptions } from 'typeorm';
 import { UserGroupMember } from './user-group-member.entity';
 import {
   AddUserToGroupDto,
@@ -223,12 +217,18 @@ export class UserGroupMemberService {
       take: query.size,
     };
 
-    if (query.phonenumber) {
+    // Buoc 8.2 - SDT (chuoi con) loc truoc o shared-user, roi
+    // `user.sharedUserId IN (...)`: cot SDT cuc bo doi ten o 8.9. Vuot tran =>
+    // 400 137007 "tim hep lai"; shared-user khong tra loi => 503 (fail-closed).
+    const phonenumberFragment = query.phonenumber?.trim();
+    if (phonenumberFragment) {
+      const sharedUserIds =
+        await this.sharedUserServiceClient.searchIdsByPhonenumber(
+          phonenumberFragment,
+        );
       findManyOptions.where = {
         ...whereOptions,
-        user: {
-          phonenumber: Like(`%${query.phonenumber}%`),
-        },
+        user: { sharedUserId: In(sharedUserIds) },
       };
     }
 

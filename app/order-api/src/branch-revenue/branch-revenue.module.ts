@@ -29,8 +29,6 @@ import { QueueRegisterKey } from 'src/app/app.constants';
 import { BullModule } from '@nestjs/bullmq';
 import { Invoice } from 'src/invoice/invoice.entity';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
-import { AccumulatedPoint } from 'src/accumulated-point/entities/accumulated-point.entity';
-import { AccumulatedPointTransactionHistory } from 'src/accumulated-point/entities/accumulated-point-transaction-history.entity';
 import { User } from 'src/user/user.entity';
 @Module({
   imports: [
@@ -47,8 +45,6 @@ import { User } from 'src/user/user.entity';
       Payment,
       ACBConnectorConfig,
       Invoice,
-      AccumulatedPoint,
-      AccumulatedPointTransactionHistory,
       User,
     ]),
     BullModule.registerQueue({

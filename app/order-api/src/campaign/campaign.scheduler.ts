@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { User } from 'src/user/user.entity';
-import { LessThan, LessThanOrEqual, Repository } from 'typeorm';
+import { In, LessThan, LessThanOrEqual, Repository } from 'typeorm';
 import { CampaignStatus, CampaignType } from './campaign.constants';
 import { CampaignService } from './campaign.service';
 import { Campaign } from './entity/campaign.entity';
@@ -58,22 +58,44 @@ export class CampaignScheduler {
   async handleBirthdayCampaigns(): Promise<void> {
     const context = `${CampaignScheduler.name}.${this.handleBirthdayCampaigns.name}`;
     const today = new Date();
-    const monthDay = `${String(today.getDate()).padStart(2, '0')}${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const dayMonth = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-    const birthdayUsers = await this.userRepository
-      .createQueryBuilder('user')
-      .where('user.dobDM = :dobDM', { dobDM: `${monthDay}` })
-      .andWhere('user.dobDM IS NOT NULL')
-      .getMany();
+    // Buoc 8.1 (QD-T8): terminal GIU scheduler sinh nhat rieng (campaign cua
+    // doanh nghiep nay, khong phai loi chuc lap voi trend) nhung ngay sinh
+    // thuoc shared-user: hoi shared-user ai co sinh nhat hom nay, roi chi lay
+    // nguoi terminal biet (`sharedUserId IN (...)`). Cot ngay sinh cuc bo bi
+    // doi ten o 8.9. shared-user khong tra loi => bo qua ca ngay, ghi log loi
+    // (khong chuc bang du lieu cu).
+    let birthdaySharedUserIds: string[];
+    try {
+      birthdaySharedUserIds =
+        await this.sharedUserServiceClient.searchIdsByBirthday({
+          type: 'day_month',
+          from: dayMonth,
+          to: dayMonth,
+        });
+    } catch (error) {
+      this.logger.error(
+        `Cannot load birthdays of ${dayMonth} from shared-user, skipping today: ${error?.message}`,
+        error?.stack,
+        context,
+      );
+      return;
+    }
+    const birthdayUsers = birthdaySharedUserIds.length
+      ? await this.userRepository.find({
+          where: { sharedUserId: In(birthdaySharedUserIds) },
+        })
+      : [];
 
     this.logger.log(
-      `Found ${birthdayUsers.length} birthday users for ${monthDay}`,
+      `Found ${birthdayUsers.length} birthday users for ${dayMonth} (${birthdaySharedUserIds.length} in shared-user)`,
       context,
     );
 
     // Buoc 5.6 (5.2(a)): MOT luot lookupByIds cho ca lo (client tu chia moi
     // 200 id) - strategy lay ngon ngu thong bao tu map nay, khong tra lai trong
-    // vong lap. Loc `dobDM` cuc bo o tren de lai buoc 8.1.
+    // vong lap.
     let identities: CampaignIdentities;
     try {
       identities = await batchLookupSharedUserIdentities(

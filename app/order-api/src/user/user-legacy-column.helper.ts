@@ -1,4 +1,5 @@
 import { EntityManager } from 'typeorm';
+import { User } from './user.entity';
 
 /**
  * Doc/ghi cot CUC BO cua `user_tbl` ma entity `User` da bo (hoac se bo) - danh
@@ -16,6 +17,10 @@ import { EntityManager } from 'typeorm';
  *
  * Mot nguon duy nhat cho chuyen "cot nay ten gi tren DB nay" - cac buoc 4.7 va
  * 8.9 them cot vao day, khong viet lai phep do o tung noi goi.
+ *
+ * Buoc 8.8: entity `User` bo ca muoi cot identity => them nhom
+ * `LocalIdentity` ben duoi (9 cot script / retire con dung; `language`
+ * khong ai doc).
  */
 
 const USER_TABLE = 'user_tbl';
@@ -170,4 +175,138 @@ export async function writeLocalIsActive(
       `Ghi ${column} cho user ${userId} khop ${matched} hang (phai la 1)`,
     );
   }
+}
+
+/**
+ * Buoc 8.8 - chin cot identity CUC BO ma entity `User` da bo, theo ten field
+ * logic. Chi script backfill va `user-retire.helper.ts` con dung (doc de
+ * so khop / nhap sang `shared-user`, ghi khi retire / attach). 8.9 doi ten
+ * chung thanh `_deprecated_*` => luon do ten qua `resolveUserColumn`.
+ */
+export const USER_IDENTITY_COLUMNS = {
+  phonenumber: 'phonenumber_column',
+  password: 'password_column',
+  firstName: 'first_name_column',
+  lastName: 'last_name_column',
+  email: 'email_column',
+  dob: 'dob_column',
+  dobDM: 'dob_day_month',
+  address: 'address_column',
+  image: 'image_column',
+} as const;
+
+export type LocalIdentityField = keyof typeof USER_IDENTITY_COLUMNS;
+export type LocalIdentity = { [K in LocalIdentityField]: string | null };
+/** Hang `user_tbl` kem identity cuc bo doc bang SQL tho - kieu cua script. */
+export type LegacyUser = User & LocalIdentity;
+
+const IDENTITY_FIELDS = Object.keys(
+  USER_IDENTITY_COLUMNS,
+) as LocalIdentityField[];
+
+const emptyIdentity = (): LocalIdentity =>
+  Object.fromEntries(IDENTITY_FIELDS.map((f) => [f, null])) as LocalIdentity;
+
+/** Gia tri identity cuc bo dang nam tren object (de ghi nguoc xuong DB). */
+export const identityOf = (user: LegacyUser): LocalIdentity =>
+  Object.fromEntries(
+    IDENTITY_FIELDS.map((f) => [f, user[f] ?? null]),
+  ) as LocalIdentity;
+
+async function resolveIdentityColumns(
+  manager: EntityManager,
+): Promise<Record<LocalIdentityField, string>> {
+  const out = {} as Record<LocalIdentityField, string>;
+  for (const field of IDENTITY_FIELDS) {
+    out[field] = await resolveUserColumn(manager, USER_IDENTITY_COLUMNS[field]);
+  }
+  return out;
+}
+
+/**
+ * Identity cuc bo cua moi hang `user_tbl` (hoac cua mot hang), theo
+ * `id_column`. Gia tri `null` giu nguyen - KHONG thay mac dinh.
+ */
+export async function readLocalIdentity(
+  manager: EntityManager,
+  userId?: string,
+): Promise<Map<string, LocalIdentity>> {
+  const columns = await resolveIdentityColumns(manager);
+  const select = IDENTITY_FIELDS.map(
+    (f) => `\`${columns[f]}\` AS \`${f}\``,
+  ).join(', ');
+  const rows: Array<Record<string, unknown>> = await manager.query(
+    `SELECT \`id_column\` AS id, ${select} FROM \`${USER_TABLE}\`` +
+      (userId ? ' WHERE `id_column` = ?' : ''),
+    userId ? [userId] : [],
+  );
+  const result = new Map<string, LocalIdentity>();
+  for (const row of rows) {
+    const identity = emptyIdentity();
+    for (const f of IDENTITY_FIELDS) {
+      const value = row[f];
+      identity[f] =
+        value === null || value === undefined ? null : String(value);
+    }
+    result.set(String(row.id), identity);
+  }
+  return result;
+}
+
+/** Nhu `readLocalIdentity` cho MOT hang; `null` khi khong co hang do. */
+export async function readLocalIdentityOf(
+  manager: EntityManager,
+  userId: string,
+): Promise<LocalIdentity | null> {
+  return (await readLocalIdentity(manager, userId)).get(userId) ?? null;
+}
+
+/** Gan identity cuc bo (doc MOT lan cho ca lo) vao cac hang vua `find`. */
+export async function withLocalIdentity(
+  manager: EntityManager,
+  users: User[],
+): Promise<LegacyUser[]> {
+  const identities = await readLocalIdentity(manager);
+  return users.map((user) =>
+    Object.assign(user, identities.get(user.id) ?? emptyIdentity()),
+  );
+}
+
+/**
+ * Ghi cac cot identity cuc bo cua MOT hang. Nem loi neu khong khop dung mot
+ * hang (nhu `writeLocalIsActive`).
+ */
+export async function writeLocalIdentity(
+  manager: EntityManager,
+  userId: string,
+  values: Partial<LocalIdentity>,
+): Promise<void> {
+  const fields = IDENTITY_FIELDS.filter((f) => f in values);
+  if (fields.length === 0) return;
+  const columns = await resolveIdentityColumns(manager);
+  const result = await manager.query(
+    `UPDATE \`${USER_TABLE}\` SET ${fields
+      .map((f) => `\`${columns[f]}\` = ?`)
+      .join(', ')} WHERE \`id_column\` = ?`,
+    [...fields.map((f) => values[f] ?? null), userId],
+  );
+  const matched = Number(result?.affectedRows ?? result?.[0]?.affectedRows);
+  if (matched !== 1) {
+    throw new Error(
+      `Ghi identity cuc bo cho user ${userId} khop ${matched} hang (phai la 1)`,
+    );
+  }
+}
+
+/**
+ * `manager.save(User, user)` roi ghi nguoc identity cuc bo dang nam tren
+ * object - thay cho `save` truoc 8.8 (khi entity con giu chin cot nay).
+ */
+export async function saveLegacyUser(
+  manager: EntityManager,
+  user: LegacyUser,
+): Promise<User> {
+  const saved = await manager.save(User, user);
+  await writeLocalIdentity(manager, user.id, identityOf(user));
+  return saved;
 }

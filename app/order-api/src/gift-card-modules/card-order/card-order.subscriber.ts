@@ -15,8 +15,6 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { createCancelCardOrderJobName } from './card-order.constants';
 import { ConfigService } from '@nestjs/config';
 import { GiftCardService } from '../gift-card/gift-card.service';
-import { PointTransactionService } from '../point-transaction/point-transaction.service';
-import { BalanceService } from '../balance/balance.service';
 import { CardOrderService } from './card-order.service';
 import { CardOrderException } from './card-order.exception';
 import { CardOrderValidation } from './card-order.validation';
@@ -36,8 +34,6 @@ export class CardOrderSubscriber
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly configService: ConfigService,
     private readonly gcService: GiftCardService,
-    private readonly ptService: PointTransactionService,
-    private readonly balanceService: BalanceService,
     private readonly cardOrderService: CardOrderService,
     private readonly paymentUtils: PaymentUtils
   ) {

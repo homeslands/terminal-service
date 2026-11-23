@@ -121,15 +121,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const scope = this.authUtils.buildScope(user);
 
     // Ten hien thi cho audit-log (ClsService). Lay tu identity VUA tra ben
-    // shared-user chu khong tu cache cuc bo: ho ten la field identity, cache
-    // cuc bo co the da cu vi nguoi dung sua ho so thang ben shared-user.
-    // Chi rot ve cache khi shared-user khong co ho ten.
-    const firstName = sharedUser.firstName ?? user.firstName;
-    const lastName = sharedUser.lastName ?? user.lastName;
+    // shared-user. Buoc 8.8: het duong rot ve cache cuc bo - cot ho ten / SDT
+    // da roi entity; thieu ho ten thi dung SDT cua shared-user.
+    const { firstName, lastName } = sharedUser;
     const userName =
       firstName && lastName
         ? `${firstName} ${lastName}`
-        : (sharedUser.phonenumber ?? user.phonenumber);
+        : sharedUser.phonenumber;
     const userSlug = user.slug;
 
     this.clsService.set('user', userName);

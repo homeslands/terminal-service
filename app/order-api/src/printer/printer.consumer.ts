@@ -352,10 +352,12 @@ export class PrinterConsumer extends WorkerHost {
           printerJobId,
           manager,
         );
+        // Buoc 8.11: cap nhat qua entity. Chuoi 'printer_job_tbl' (bo ten DB) bi TypeORM khop vao
+        // entity PrinterJob theo ten bang roi doi TEN THUOC TINH => EntityPropertyNotFoundError.
         await manager.update(
-          'terminal_db.printer_job_tbl',
-          { id_column: printerJobId },
-          { status_column: PrinterJobStatus.PRINTED },
+          PrinterJob,
+          { id: printerJobId },
+          { status: PrinterJobStatus.PRINTED },
         );
       },
       async () => {

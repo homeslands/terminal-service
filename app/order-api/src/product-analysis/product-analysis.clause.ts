@@ -1,3 +1,5 @@
+// Buoc 8.11: SQL tho chay tren DB cua chinh ket noi (DATABASE_NAME) - KHONG ghi ten DB
+// truoc ten bang (BE-12: ten monolith `order_db.` lam dashboard tra 500 o moi DB ten khac).
 export const getAllProductAnalysisClause = `
     SELECT
         b.id_column AS branchId,
@@ -5,14 +7,14 @@ export const getAllProductAnalysisClause = `
         v.product_column AS productId,
         SUM(oi.quantity_column) AS totalProducts
     FROM 
-        terminal_db.variant_tbl AS v
-    INNER JOIN terminal_db.order_item_tbl AS oi
+        variant_tbl AS v
+    INNER JOIN order_item_tbl AS oi
         ON v.id_column = oi.variant_column
-    INNER JOIN terminal_db.order_tbl AS o
+    INNER JOIN order_tbl AS o
         ON oi.order_column = o.id_column
-    INNER JOIN terminal_db.branch_tbl AS b
+    INNER JOIN branch_tbl AS b
         ON o.branch_column = b.id_column
-    INNER JOIN terminal_db.payment_tbl AS p
+    INNER JOIN payment_tbl AS p
         ON o.payment_column = p.id_column
     WHERE
         p.status_code_column = 'completed'
@@ -35,14 +37,14 @@ export const getYesterdayProductAnalysisClause = `
         v.product_column AS productId,
         SUM(oi.quantity_column) AS totalProducts
     FROM 
-        terminal_db.variant_tbl AS v
-    INNER JOIN terminal_db.order_item_tbl AS oi
+        variant_tbl AS v
+    INNER JOIN order_item_tbl AS oi
         ON v.id_column = oi.variant_column
-    INNER JOIN terminal_db.order_tbl AS o
+    INNER JOIN order_tbl AS o
         ON oi.order_column = o.id_column
-    INNER JOIN terminal_db.branch_tbl AS b
+    INNER JOIN branch_tbl AS b
         ON o.branch_column = b.id_column
-    INNER JOIN terminal_db.payment_tbl AS p
+    INNER JOIN payment_tbl AS p
         ON o.payment_column = p.id_column
     WHERE
         o.created_at_column >= CURRENT_DATE() - INTERVAL 1 DAY
@@ -69,14 +71,14 @@ export const getSpecificProductAnalysisClause = `
         v.product_column AS productId,
         SUM(oi.quantity_column) AS totalProducts
     FROM 
-        terminal_db.variant_tbl AS v
-    INNER JOIN terminal_db.order_item_tbl AS oi
+        variant_tbl AS v
+    INNER JOIN order_item_tbl AS oi
         ON v.id_column = oi.variant_column
-    INNER JOIN terminal_db.order_tbl AS o
+    INNER JOIN order_tbl AS o
         ON oi.order_column = o.id_column
-    INNER JOIN terminal_db.branch_tbl AS b
+    INNER JOIN branch_tbl AS b
         ON o.branch_column = b.id_column
-    INNER JOIN terminal_db.payment_tbl AS p
+    INNER JOIN payment_tbl AS p
         ON o.payment_column = p.id_column
     WHERE
         o.created_at_column >= ?
@@ -99,14 +101,14 @@ export const getSpecificProductAnalysisByHourAndBranchClause = `
         v.product_column AS productId,
         SUM(oi.quantity_column) AS totalProducts
     FROM 
-        terminal_db.variant_tbl AS v
-    INNER JOIN terminal_db.order_item_tbl AS oi
+        variant_tbl AS v
+    INNER JOIN order_item_tbl AS oi
         ON v.id_column = oi.variant_column
-    INNER JOIN terminal_db.order_tbl AS o
+    INNER JOIN order_tbl AS o
         ON oi.order_column = o.id_column
-    INNER JOIN terminal_db.branch_tbl AS b
+    INNER JOIN branch_tbl AS b
         ON o.branch_column = b.id_column
-    INNER JOIN terminal_db.payment_tbl AS p
+    INNER JOIN payment_tbl AS p
         ON o.payment_column = p.id_column
     WHERE
         o.created_at_column >= ?

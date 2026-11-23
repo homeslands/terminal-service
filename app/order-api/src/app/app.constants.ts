@@ -24,4 +24,6 @@ export enum DistributeLockJobKey {
   // job chan nhau - va dung luc can bu nhat (ngay sau mot dot su co) thi
   // luoi rong lai bi khoa.
   SYNC_RECENTLY_REGISTERED_USERS_FAST = 'sync-recently-registered-users-fast',
+  // Buoc 9.1 - job doi soat vi/diem Z-8, 1 lan/ngay.
+  RECONCILE_WALLET = 'reconcile-wallet',
 }

@@ -35,6 +35,14 @@ export class UserScheduler {
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async updateUserRole() {
     const context = `${UserScheduler.name}.${this.updateUserRole.name}`;
+    // Buoc 9.5 - nhieu replica: mot replica chay. Khoa KHONG release, giu
+    // 10 phut de replica lech dong ho khong chay lai.
+    const lock = await this.acquireSyncLock(
+      DistributeLockJobKey.UPDATE_USER_ROLE_EVERY_DAY_AT_3AM,
+      10 * 60 * 1000,
+      context,
+    );
+    if (!lock) return;
     this.logger.log(`Update user role`, context);
 
     const usersWithoutRole = await this.userRepository

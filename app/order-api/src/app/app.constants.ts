@@ -26,4 +26,10 @@ export enum DistributeLockJobKey {
   SYNC_RECENTLY_REGISTERED_USERS_FAST = 'sync-recently-registered-users-fast',
   // Buoc 9.1 - job doi soat vi/diem Z-8, 1 lan/ngay.
   RECONCILE_WALLET = 'reconcile-wallet',
+  // Buoc 9.5 - nhieu replica: moi @Cron chi mot replica chay. Khoa cua job
+  // theo lich GIU toi het TTL (khong release): replica lech dong ho vai giay
+  // chay sau mot ban da xong nhanh thi van gap khoa va bo qua.
+  SYNC_CAMPAIGN_STATUSES = 'sync-campaign-statuses',
+  BIRTHDAY_CAMPAIGNS_EVERY_DAY_AT_1AM = 'birthday-campaigns-every-day-at-1am',
+  UPDATE_USER_ROLE_EVERY_DAY_AT_3AM = 'update-user-role-every-day-at-3am',
 }

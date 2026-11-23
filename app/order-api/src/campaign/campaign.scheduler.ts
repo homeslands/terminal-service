@@ -1,4 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import Redlock from 'redlock';
+import { DistributeLockJobKey, QueueRegisterKey } from 'src/app/app.constants';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
@@ -21,11 +25,42 @@ export class CampaignScheduler {
     private readonly campaignService: CampaignService,
     @Inject(WINSTON_MODULE_NEST_PROVIDER) private readonly logger: Logger,
     private readonly sharedUserServiceClient: SharedUserServiceClient,
+    @InjectQueue(QueueRegisterKey.DISTRIBUTE_LOCK_JOB)
+    private readonly distributeLockJobQueue: Queue,
   ) {}
+
+  /**
+   * Buoc 9.5 - nhieu replica: chi replica lay duoc khoa moi chay. Khoa KHONG
+   * release, de het TTL: replica lech dong ho vai giay chay sau mot ban da
+   * xong nhanh thi van gap khoa va bo qua (sinh nhat chay hai lan la hai loi
+   * chuc). TTL phai ngan hon chu ky cua cron.
+   */
+  private async acquireCronLock(
+    key: DistributeLockJobKey,
+    ttl: number,
+    context: string,
+  ): Promise<boolean> {
+    const client = await this.distributeLockJobQueue.client;
+    const redlock = new Redlock([client]);
+    try {
+      await redlock.acquire([key], ttl);
+      return true;
+    } catch {
+      this.logger.log(`Another replica already ran ${key}, skip`, context);
+      return false;
+    }
+  }
 
   @Cron(CronExpression.EVERY_MINUTE)
   async syncCampaignStatuses(): Promise<void> {
     const context = `${CampaignScheduler.name}.${this.syncCampaignStatuses.name}`;
+    // Moi phut: giu khoa 50 giay (< chu ky 60 giay).
+    const locked = await this.acquireCronLock(
+      DistributeLockJobKey.SYNC_CAMPAIGN_STATUSES,
+      50 * 1000,
+      context,
+    );
+    if (!locked) return;
     const now = new Date();
 
     const toOpen = await this.campaignRepository.find({
@@ -57,6 +92,13 @@ export class CampaignScheduler {
   @Cron(CronExpression.EVERY_DAY_AT_1AM)
   async handleBirthdayCampaigns(): Promise<void> {
     const context = `${CampaignScheduler.name}.${this.handleBirthdayCampaigns.name}`;
+    // Moi ngay: giu khoa 10 phut.
+    const locked = await this.acquireCronLock(
+      DistributeLockJobKey.BIRTHDAY_CAMPAIGNS_EVERY_DAY_AT_1AM,
+      10 * 60 * 1000,
+      context,
+    );
+    if (!locked) return;
     const today = new Date();
     const dayMonth = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}`;
 

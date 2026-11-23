@@ -1,3 +1,5 @@
+// Buoc 8.11: SQL tho chay tren DB cua chinh ket noi (DATABASE_NAME) - KHONG ghi ten DB
+// truoc ten bang (BE-12: ten monolith `order_db.` lam dashboard tra 500 o moi DB ten khac).
 export const getAllRevenueClause = `
     SELECT 
         DATE(order_tbl.created_at_column) AS date,
@@ -8,13 +10,13 @@ export const getAllRevenueClause = `
         SUM(order_item_tbl.subtotal_column) AS totalFinalOrderItemAmount, -- final order item
         COUNT(order_tbl.id_column) AS totalOrder
     FROM 
-        terminal_db.payment_tbl AS payment_tbl
+        payment_tbl AS payment_tbl
     INNER JOIN 
-        terminal_db.order_tbl AS order_tbl 
+        order_tbl AS order_tbl 
     ON 
         payment_tbl.id_column = order_tbl.payment_column
     INNER JOIN
-        terminal_db.order_item_tbl AS order_item_tbl
+        order_item_tbl AS order_item_tbl
     ON
         order_tbl.id_column = order_item_tbl.order_column
     WHERE 
@@ -35,13 +37,13 @@ export const getCurrentRevenueClause = `
         SUM(order_item_tbl.subtotal_column) AS totalFinalOrderItemAmount, -- final order item
         COUNT(order_tbl.id_column) AS totalOrder
     FROM 
-        terminal_db.payment_tbl AS payment_tbl
+        payment_tbl AS payment_tbl
     INNER JOIN 
-        terminal_db.order_tbl AS order_tbl 
+        order_tbl AS order_tbl 
     ON 
         payment_tbl.id_column = order_tbl.payment_column
     INNER JOIN
-        terminal_db.order_item_tbl AS order_item_tbl
+        order_item_tbl AS order_item_tbl
     ON
         order_tbl.id_column = order_item_tbl.order_column
     WHERE 
@@ -64,13 +66,13 @@ export const getYesterdayRevenueClause = `
         SUM(order_item_tbl.subtotal_column) AS totalFinalOrderItemAmount, -- final order item
         COUNT(order_tbl.id_column) AS totalOrder
     FROM 
-        terminal_db.payment_tbl AS payment_tbl
+        payment_tbl AS payment_tbl
     INNER JOIN 
-        terminal_db.order_tbl AS order_tbl 
+        order_tbl AS order_tbl 
     ON 
         payment_tbl.id_column = order_tbl.payment_column
     INNER JOIN
-        terminal_db.order_item_tbl AS order_item_tbl
+        order_item_tbl AS order_item_tbl
     ON
         order_tbl.id_column = order_item_tbl.order_column
     WHERE 
@@ -93,13 +95,13 @@ export const getSpecificRangeRevenueClause = `
         SUM(order_item_tbl.subtotal_column) AS totalFinalOrderItemAmount, -- final order item
         COUNT(order_tbl.id_column) AS totalOrder
     FROM 
-        terminal_db.payment_tbl AS payment_tbl
+        payment_tbl AS payment_tbl
     INNER JOIN 
-        terminal_db.order_tbl AS order_tbl 
+        order_tbl AS order_tbl 
     ON 
         payment_tbl.id_column = order_tbl.payment_column
     INNER JOIN
-        terminal_db.order_item_tbl AS order_item_tbl
+        order_item_tbl AS order_item_tbl
     ON
         order_tbl.id_column = order_item_tbl.order_column
     WHERE 

@@ -104,10 +104,18 @@ services:
       QR_ACTIVE_TTL: ${QR_ACTIVE_TTL}
       QR_IDEMPOTENT_TTL: ${QR_IDEMPOTENT_TTL}
 
+      #HTTP
+      SHARED_USER_API_URL: ${SHARED_USER_API_URL}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       # Wallet reconciliation Z-8 (step 9.1): shared-user schema on the same
       # MySQL + wallet cutover time. Empty = the job is off.
       WALLET_RECONCILE_SHARED_USER_DB: ${WALLET_RECONCILE_SHARED_USER_DB:-}
       WALLET_RECONCILE_SINCE: ${WALLET_RECONCILE_SINCE:-}
+
+      #RabbitMQ
+      RABBITMQ_URL: ${RABBITMQ_URL}
+
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
 
       TZ: Asia/Ho_Chi_Minh
 

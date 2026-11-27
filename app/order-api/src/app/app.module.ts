@@ -76,6 +76,8 @@ import { ZaloOaConnectorModule } from 'src/zalo-oa-connector/zalo-oa-connector.m
 import { SharedModule } from 'src/shared/shared.module';
 import { InvoiceAreaModule } from 'src/invoice-area/invoice-area.module';
 import { AccumulatedPointModule } from 'src/accumulated-point/accumulated-point.module';
+import { WalletReconcileModule } from 'src/wallet-reconcile/wallet-reconcile.module';
+import { DomainEventsModule } from 'src/domain-events/domain-events.module';
 import { BranchConfigModule } from 'src/branch-config/branch-config.module';
 import { FeatureFlagSystemModule } from 'src/feature-flag-system/feature-flag-system.module';
 import { FeatureGuard } from 'src/feature-flag-system/guard/fureture.guard';
@@ -197,6 +199,8 @@ import { TestModule } from 'src/test/test.module';
     SharedModule,
     InvoiceAreaModule,
     AccumulatedPointModule,
+    WalletReconcileModule,
+    DomainEventsModule,
     BranchConfigModule,
     FeatureFlagSystemModule,
     GoogleMapModule,

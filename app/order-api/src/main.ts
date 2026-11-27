@@ -28,7 +28,11 @@ async function bootstrap() {
     options: {
       urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
       queue: 'terminal_queue',
-      queueOptions: { durable: false },
+      // Buoc 9.2: durable o MOI ben khai cung queue, CUNG LUC. RabbitMQ tu choi
+      // queue.declare khi `durable` lech queue dang co (PRECONDITION_FAILED) =>
+      // service khong len. Queue `durable=false` con tren broker phai xoa trong
+      // cua so phat hanh, truoc khi ban nay khoi dong.
+      queueOptions: { durable: true },
     },
   });
 

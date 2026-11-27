@@ -23,6 +23,7 @@ import { assertUserKeyLoaded } from 'src/user/user.constant';
 import { InvoiceAction } from 'src/invoice/invoice.constants';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AccumulatedPointService } from 'src/accumulated-point/accumulated-point.service';
+import { OrderEventPublisher } from 'src/domain-events/order-event.publisher';
 import { calculateAccumulatedPoints } from 'src/accumulated-point/accumulated-point.utils';
 import {
   orderOpIdempotencyKey,
@@ -47,6 +48,8 @@ export class JobService {
     private readonly sharedUserServiceClient: SharedUserServiceClient,
     private readonly eventEmitter: EventEmitter2,
     private readonly accumulatedPointService: AccumulatedPointService,
+    // Buoc 9.3: phat `order.completed` sau khi chot (ban-va-quen).
+    private readonly orderEventPublisher: OrderEventPublisher,
   ) {}
 
   // Buoc 7.7c - tru xu cua don qua vi shared-user. Tra khoa da tru (de Z-7
@@ -173,6 +176,9 @@ export class JobService {
         // lam don KHONG chot duoc sau khi da tru xu => `release` cung khoa roi
         // nem tiep (don + job con PENDING nhu 7.5). `release` hong => log
         // CRITICAL de doi soat Z-8 / xu tay.
+        // Buoc 9.3: `finalized` nang ra ngoai `try` de doan phat
+        // `order.completed` ben duoi biet lenh chot da commit chua.
+        let finalized = false;
         try {
           // confirm use accumulated points - QD7: KHONG bat loi. Hong ma van chot
           // thi khach da duoc giam bang diem, diem chua bi tru, va dong giu cho
@@ -200,7 +206,6 @@ export class JobService {
             (lastOrderWithNumber?.referenceNumber ?? 0) + 1;
 
           // Update order status to PAID
-          let finalized = false;
           await this.transactionManagerService.execute(
             async (manager) => {
               Object.assign(order, {
@@ -293,6 +298,16 @@ export class JobService {
             error.stack,
             context,
           );
+        }
+
+        // Buoc 9.3: bao `order.completed` cho side-effect KHONG bat buoc (log
+        // phan tich, thong bao, campaign) - sau khi da chot + cong diem bang
+        // HTTP noi bo; luong tien khong qua broker (architect-http.md 6.3).
+        // Ban-va-quen: khong cho broker, khong nem. Chi khi lenh chot da
+        // commit: BE-22 nuot loi chot, thieu guard nay thi don CHUA chot
+        // cung bi bao "completed".
+        if (finalized) {
+          this.orderEventPublisher.publishOrderCompleted(order);
         }
 
         // create invoice

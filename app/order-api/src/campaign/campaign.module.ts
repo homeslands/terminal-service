@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { QueueRegisterKey } from 'src/app/app.constants';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SharedUserServiceModule } from 'src/external-services/shared-user-service/shared-user-service.module';
 import { User } from 'src/user/user.entity';
@@ -19,6 +21,8 @@ import { UserBirthdayCampaignStrategy } from './strategy/user-birthday-campaign/
 @Module({
   imports: [
     SharedUserServiceModule,
+    // Buoc 9.5: khoa phan tan cho @Cron cua CampaignScheduler.
+    BullModule.registerQueue({ name: QueueRegisterKey.DISTRIBUTE_LOCK_JOB }),
     TypeOrmModule.forFeature([
       Campaign,
       CampaignRecipient,
